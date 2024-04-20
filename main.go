@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -225,8 +226,11 @@ func (msg *message) importToGmail(mail *gmail.Service) error {
 	}
 
 	if r.HTTPStatusCode != 200 {
-		log.Printf("Gmail returned status code: %v", r.HTTPStatusCode)
+		err := fmt.Errorf("gmail returned status code: %v", r.HTTPStatusCode)
+		log.Printf("%v", err)
+		return err
 	}
+
 	return nil
 }
 
