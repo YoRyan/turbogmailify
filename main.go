@@ -203,13 +203,14 @@ func fetchFirstMessage(client *imapclient.Client) (*message, error) {
 		contents: data}, nil
 }
 
+// An email fetched from an IMAP mailbox.
 type message struct {
 	uid      imap.UID
 	contents []byte
 }
 
 // Import this message to Gmail via media upload.
-func (msg *message) importToGmail(mail *gmail.Service) error {
+func (m *message) importToGmail(mail *gmail.Service) error {
 	r, err := mail.Users.Messages.
 		Import("me", &gmail.Message{LabelIds: []string{"INBOX", "UNREAD"}}).
 		InternalDateSource("dateHeader").
@@ -217,7 +218,7 @@ func (msg *message) importToGmail(mail *gmail.Service) error {
 		ProcessForCalendar(true).
 		Deleted(false).
 		Media(
-			bytes.NewReader(msg.contents),
+			bytes.NewReader(m.contents),
 			googleapi.ContentType("message/rfc822")).
 		Do()
 	if err != nil {
