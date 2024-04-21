@@ -25,6 +25,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/googleapi"
@@ -42,45 +44,100 @@ import (
 const maxPollTime = 5 * time.Minute
 
 func main() {
-	var (
-		imapAddress = flag.String(
-			"address", "", "IMAP address to connect to (must use implicit TLS)")
-		imapUsername = flag.String(
-			"username", "", "IMAP username")
-		imapPassword = flag.String(
-			"password", "", "IAMP password")
-		gmailSecrets = flag.String(
-			"secrets", "credentials.json", "OAuth2 client secret file for Gmail")
-		gmailTokens = flag.String(
-			"tokens", "token.json", "OAuth2 access and refresh token storage for Gmail")
-	)
 	flag.Parse()
 
-	mail := getGmailService(*gmailSecrets, *gmailTokens)
+	cfg := &config{}
 
-	for {
-		doSession(
-			imapCredentials{*imapAddress, *imapUsername, *imapPassword}, mail)
+	f, err := os.OpenFile(flag.Arg(0), os.O_RDWR, 0600)
+	if err != nil {
+		log.Fatalf("Failed to open config file: %v", err)
+	}
 
-		// Error'd out. Cool down and try again.
-		time.Sleep(maxPollTime)
+	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+		log.Fatalf("Failed to parse config file: %v", err)
+	}
+
+	if len(cfg.Imap) <= 0 {
+		log.Fatalf("Failed to parse config file: " +
+			"IMAP credentials section is empty or not a JSON list")
+	}
+
+	mail := getGmailService(*cfg, f)
+	f.Close()
+
+	// Spin up a goroutine for each IMAP connection.
+	for _, imapCreds := range cfg.Imap {
+		go func() {
+			for {
+				doSession(&imapCreds, mail)
+
+				// Error'd out. Cool down and try again.
+				time.Sleep(maxPollTime)
+			}
+		}()
+	}
+
+	// Put the main goroutine to sleep.
+	log.Printf("Startup complete; waiting for mail")
+	select {}
+}
+
+// Configuration file loaded from or saved to JSON.
+type config struct {
+	Imap    []imapCredentials
+	Secrets interface{}
+	Tokens  *oauth2.Token `json:",omitempty"`
+}
+
+// Save this configuration back to a JSON file.
+func (c *config) writeTo(f *os.File) {
+	if _, err := f.Seek(0, 0); err != nil {
+		log.Fatalf("Unable to seek config file: %v", err)
+	}
+
+	if err := json.NewEncoder(f).Encode(c); err != nil {
+		log.Fatalf("Unable to write back to config file: %v", err)
 	}
 }
 
-func getGmailService(secretsFile string, tokensFile string) *gmail.Service {
+// Information needed to connect to an IMAP server. Implicit TLS is mandatory.
+type imapCredentials struct {
+	Address  string
+	Username string
+	Password string
+}
+
+// Obtain access to the Gmail API, refreshing and saving access tokens if
+// needed.
+func getGmailService(cfg config, cfgFile *os.File) *gmail.Service {
 	ctx := context.Background()
-	b, err := os.ReadFile(secretsFile)
+
+	// Need to submit the client secret as JSON bytes, leading to this silly
+	// re-encode step.
+	secrets, err := json.Marshal(cfg.Secrets)
 	if err != nil {
-		log.Fatalf("Unable to read client secret file: %v", err)
+		log.Fatalf("JSON re-encode error: %v", err)
 	}
 
-	// If modifying these scopes, delete your previously saved token.json.
-	config, err := google.ConfigFromJSON(b, gmail.GmailInsertScope)
+	oauth, err := google.ConfigFromJSON(secrets, gmail.GmailInsertScope)
 	if err != nil {
-		log.Fatalf("Unable to parse client secret file to config: %v", err)
+		log.Fatalf("Unable to parse client secret to oauth2 config: %v", err)
 	}
-	client := getClient(config, tokensFile)
 
+	// Attempt to retrieve stored access and refresh tokens; otherwise request
+	// them from Google.
+	var tok *oauth2.Token
+	if cfg.Tokens != nil {
+		tok = cfg.Tokens
+	} else {
+		tok = getTokenFromWeb(oauth)
+
+		cfg.Tokens = tok
+		cfg.writeTo(cfgFile)
+	}
+	client := oauth.Client(ctx, tok)
+
+	// Finally, create our Gmail client.
 	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		log.Fatalf("Unable to retrieve Gmail client: %v", err)
@@ -89,14 +146,8 @@ func getGmailService(secretsFile string, tokensFile string) *gmail.Service {
 	return srv
 }
 
-type imapCredentials struct {
-	tlsAddress string
-	username   string
-	password   string
-}
-
 // Make a new connection to the IMAP server and retrieve and expunge messages.
-func doSession(imap imapCredentials, mail *gmail.Service) error {
+func doSession(imap *imapCredentials, mail *gmail.Service) error {
 	// Make a handler and channel to receive mailbox status updates.
 	var (
 		mailboxUpdate = make(chan *imapclient.UnilateralDataMailbox)
@@ -111,7 +162,7 @@ func doSession(imap imapCredentials, mail *gmail.Service) error {
 
 	// Open the connection.
 	client, err := imapclient.DialTLS(
-		imap.tlsAddress, &imapclient.Options{UnilateralDataHandler: dataHandler})
+		imap.Address, &imapclient.Options{UnilateralDataHandler: dataHandler})
 	if err != nil {
 		log.Printf("Error connecting to IMAP server: %v", err)
 		return err
@@ -120,7 +171,7 @@ func doSession(imap imapCredentials, mail *gmail.Service) error {
 
 	// Provide credentials.
 	if err := client.
-		Login(imap.username, imap.password).
+		Login(imap.Username, imap.Password).
 		Wait(); err != nil {
 
 		log.Printf("LOGIN error: %v", err)
@@ -151,8 +202,8 @@ func doSession(imap imapCredentials, mail *gmail.Service) error {
 			}
 
 			log.Printf(
-				"Importing email (size %.1fK)",
-				float32(len(msg.contents))/1024)
+				"Importing message received by %s (size %.1fK)",
+				imap.Username, float32(len(msg.contents))/1024)
 
 			if err := msg.importToGmail(mail); err != nil {
 				return err
