@@ -102,9 +102,11 @@ func (c *config) writeTo(f *os.File) {
 
 // Information needed to connect to an IMAP server. Implicit TLS is mandatory.
 type imapCredentials struct {
-	Address  string
-	Username string
-	Password string
+	Address     string
+	Username    string
+	Password    string
+	Folder      string
+	GmailLabels []string
 }
 
 // Obtain access to the Gmail API, refreshing and saving access tokens if
@@ -178,11 +180,25 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 		return err
 	}
 
+	var folder string
+	if imap.Folder != "" {
+		folder = imap.Folder
+	} else {
+		folder = "INBOX"
+	}
+
+	var labels []string
+	if len(imap.GmailLabels) > 0 {
+		labels = imap.GmailLabels
+	} else {
+		labels = []string{"INBOX"}
+	}
+
 	for {
 		// Interrogate the inbox and retrieve and expunge everything inside.
 		for {
 			inbox, err := client.
-				Select("INBOX", nil).
+				Select(folder, nil).
 				Wait()
 			if err != nil {
 				log.Printf("SELECT error: %v", err)
@@ -202,10 +218,10 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 			}
 
 			log.Printf(
-				"Importing message received by %s (size %.1fK)",
-				imap.Username, float32(len(msg.contents))/1024)
+				"Importing message received by %s (size %.1fK, folder %s)",
+				imap.Username, float32(len(msg.contents))/1024, folder)
 
-			if err := msg.importToGmail(mail); err != nil {
+			if err := msg.importToGmail(mail, labels...); err != nil {
 				return err
 			}
 
@@ -261,9 +277,9 @@ type message struct {
 }
 
 // Import this message to Gmail via media upload.
-func (m *message) importToGmail(mail *gmail.Service) error {
+func (m *message) importToGmail(mail *gmail.Service, labels ...string) error {
 	r, err := mail.Users.Messages.
-		Import("me", &gmail.Message{LabelIds: []string{"INBOX", "UNREAD"}}).
+		Import("me", &gmail.Message{LabelIds: append(labels, "UNREAD")}).
 		InternalDateSource("dateHeader").
 		NeverMarkSpam(false).
 		ProcessForCalendar(true).
