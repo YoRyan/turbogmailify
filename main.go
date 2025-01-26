@@ -102,11 +102,10 @@ func (c *config) writeTo(f *os.File) {
 
 // Information needed to connect to an IMAP server. Implicit TLS is mandatory.
 type imapCredentials struct {
-	Address     string
-	Username    string
-	Password    string
-	Folder      string
-	GmailLabels []string
+	Address  string
+	Username string
+	Password string
+	Folders  map[string][]string
 }
 
 // Obtain access to the Gmail API, refreshing and saving access tokens if
@@ -180,53 +179,51 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 		return err
 	}
 
-	var folder string
-	if imap.Folder != "" {
-		folder = imap.Folder
+	var folders map[string][]string
+	if len(imap.Folders) > 0 {
+		folders = imap.Folders
 	} else {
-		folder = "INBOX"
-	}
-
-	var labels []string
-	if len(imap.GmailLabels) > 0 {
-		labels = imap.GmailLabels
-	} else {
-		labels = []string{"INBOX"}
+		folders = map[string][]string{
+			"INBOX": {"INBOX"},
+			"Junk":  {"SPAM"},
+		}
 	}
 
 	for {
 		// Interrogate the inbox and retrieve and expunge everything inside.
-		for {
-			inbox, err := client.
-				Select(folder, nil).
-				Wait()
-			if err != nil {
-				log.Printf("SELECT error: %v", err)
-				return err
-			}
+		for folder, labels := range folders {
+			for {
+				inbox, err := client.
+					Select(folder, nil).
+					Wait()
+				if err != nil {
+					log.Printf("SELECT error: %v", err)
+					return err
+				}
 
-			if inbox.NumMessages <= 0 {
-				break
-			}
+				if inbox.NumMessages <= 0 {
+					break
+				}
 
-			msg, err := fetchFirstMessage(client)
-			if err != nil {
-				return err
-			}
-			if msg == nil {
-				break
-			}
+				msg, err := fetchFirstMessage(client)
+				if err != nil {
+					return err
+				}
+				if msg == nil {
+					break
+				}
 
-			log.Printf(
-				"Importing message received by %s (size %.1fK, folder %s)",
-				imap.Username, float32(len(msg.contents))/1024, folder)
+				log.Printf(
+					"Importing message received by %s (size %.1fK, folder %s)",
+					imap.Username, float32(len(msg.contents))/1024, folder)
 
-			if err := msg.importToGmail(mail, labels...); err != nil {
-				return err
-			}
+				if err := msg.importToGmail(mail, labels...); err != nil {
+					return err
+				}
 
-			if err := deleteMessage(client, msg.uid); err != nil {
-				return err
+				if err := deleteMessage(client, msg.uid); err != nil {
+					return err
+				}
 			}
 		}
 
