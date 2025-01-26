@@ -310,7 +310,7 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 	)
 	if err := client.
 		Store(setNum, addDeleted, nil).
-		Wait(); err != nil {
+		Close(); err != nil {
 
 		log.Printf("STORE error: %v", err)
 		return err
@@ -318,7 +318,7 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 
 	if err := client.
 		Expunge().
-		Wait(); err != nil {
+		Close(); err != nil {
 
 		log.Printf("EXPUNGE error: %v", err)
 		return err
