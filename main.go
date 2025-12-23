@@ -214,8 +214,8 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 				}
 
 				log.Printf(
-					"Importing message received by %s (size %.1fK, folder %s)",
-					imap.Username, float32(len(msg.contents))/1024, folder)
+					"Importing message received by %s (uid %d, size %.1fK, folder %s)",
+					imap.Username, msg.uid, float32(len(msg.contents))/1024, folder)
 
 				if err := msg.importToGmail(mail, labels...); err != nil {
 					return err
@@ -241,7 +241,7 @@ func fetchFirstMessage(client *imapclient.Client) (*message, error) {
 		// message.
 		entireMessage = []*imap.FetchItemBodySection{{}}
 		fetch         = client.Fetch(
-			imap.SeqSetNum(1), &imap.FetchOptions{BodySection: entireMessage})
+			imap.SeqSetNum(1), &imap.FetchOptions{BodySection: entireMessage, UID: true})
 	)
 	defer fetch.Close()
 
