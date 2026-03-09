@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -53,7 +54,11 @@ func main() {
 		log.Fatalf("Failed to open config file: %v", err)
 	}
 
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		log.Fatalf("Failed to read config file: %v", err)
+	}
+	if err := json.Unmarshal(stripJSONC(raw), cfg); err != nil {
 		log.Fatalf("Failed to parse config file: %v", err)
 	}
 
@@ -98,6 +103,50 @@ func (c *config) writeTo(f *os.File) {
 	if err := json.NewEncoder(f).Encode(c); err != nil {
 		log.Fatalf("Unable to write back to config file: %v", err)
 	}
+}
+
+// stripJSONC removes // line comments and /* block comments */ from JSON bytes
+// so that the config file can be written as JSONC. String literals are left
+// untouched; backslash-escaped characters inside strings are handled correctly.
+func stripJSONC(data []byte) []byte {
+	out := make([]byte, 0, len(data))
+	i := 0
+	for i < len(data) {
+		switch {
+		case data[i] == '"': // string literal — copy verbatim including escapes
+			out = append(out, data[i])
+			i++
+			for i < len(data) {
+				out = append(out, data[i])
+				if data[i] == '\\' {
+					i++
+					if i < len(data) {
+						out = append(out, data[i])
+						i++
+					}
+				} else if data[i] == '"' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+		case i+1 < len(data) && data[i] == '/' && data[i+1] == '/': // line comment
+			for i < len(data) && data[i] != '\n' {
+				i++
+			}
+		case i+1 < len(data) && data[i] == '/' && data[i+1] == '*': // block comment
+			i += 2
+			for i+1 < len(data) && !(data[i] == '*' && data[i+1] == '/') {
+				i++
+			}
+			i += 2 // consume closing */
+		default:
+			out = append(out, data[i])
+			i++
+		}
+	}
+	return out
 }
 
 // Information needed to connect to an IMAP server. Implicit TLS is mandatory.
