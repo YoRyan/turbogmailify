@@ -102,11 +102,11 @@ func (c *config) writeTo(f *os.File) {
 
 // Information needed to connect to an IMAP server. Implicit TLS is mandatory.
 type imapCredentials struct {
-	Address     string
-	Username    string
-	Password    string
-	Folders     map[string][]string
-	WatchFolder string // folder to IDLE on; defaults to "INBOX" if empty
+	Address    string
+	Username   string
+	Password   string
+	Folders    map[string][]string
+	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
 }
 
 // Obtain access to the Gmail API, refreshing and saving access tokens if
@@ -195,7 +195,7 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 	// causes some servers (e.g. free.fr) to stop sending push notifications.
 	// We achieve this by draining all other folders first and WatchFolder last,
 	// so no additional SELECT is needed after the loop.
-	watchFolder := imap.WatchFolder
+	watchFolder := imap.IdleFolder
 	if watchFolder == "" {
 		watchFolder = "INBOX"
 	}
