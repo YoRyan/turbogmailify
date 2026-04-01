@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -23,6 +24,14 @@ import (
 )
 
 const maxPollTime = 5 * time.Minute
+
+// IDs of Messages that Gmail rejects (i.e., due to unsupported attachments) so we won't retry forwarding.  This
+// could be persisted, but would then need to be garbage collected.
+var badMessageIDs = make(map[string]struct{})
+
+// Start issuing warning log messages if we've tracked this many bad messages.  You should restart turbogmailify on a regular
+// basis to avoid accumulating this much state.
+const badMessageLimit = 16 * 1024
 
 // Placeholder Message ID for when an email has no Envelope at the source.
 const noValidMessageId = "no-envelope-no-msgid"
@@ -287,7 +296,7 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 					break
 				}
 
-				msg, err := fetchFirstMessage(client)
+				msg, err := fetchFirstMessage(client, inbox.NumMessages)
 				if err != nil {
 					return err
 				}
@@ -299,12 +308,15 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 					"Importing message %s (%s %s #%d, %.1fK)",
 					msg.msgId, folder, imap.Username, msg.uid, float32(len(msg.contents))/1024)
 
-				if err := msg.importToGmail(mail, labels...); err != nil {
+				doDelete, err := msg.importToGmail(msg.msgId, mail, labels...)
+				if err != nil {
 					return err
 				}
 
-				if err := deleteMessage(client, msg.uid); err != nil {
-					return err
+				if doDelete {
+					if err := deleteMessage(client, msg.uid); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -316,46 +328,62 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 	}
 }
 
-// Retrieve inbox message sequence number 1.
-func fetchFirstMessage(client *imapclient.Client) (*message, error) {
-	var (
-		// Set an empty body section to request the raw contents of the entire
-		// message.
-		entireMessage = []*imap.FetchItemBodySection{{}}
-		fetch         = client.Fetch(
-			imap.SeqSetNum(1), &imap.FetchOptions{BodySection: entireMessage, UID: true, Envelope: true})
-	)
-	defer fetch.Close()
+// Retrieve first known-not-bad message from given imap folder (if any)
+func fetchFirstMessage(client *imapclient.Client, numMessages uint32) (*message, error) {
+	// Index of message to try
+	var msgSeqNum uint32 = 1
 
-	messages, err := fetch.Collect()
-	if err != nil {
-		log.Println("FETCH error:", err)
-		return nil, err
+	// Loop until we find a not-known-bad message or run out of messages
+	for {
+		var (
+			// Set an empty body section to request the raw contents of the entire
+			// message.
+			entireMessage = []*imap.FetchItemBodySection{{}}
+			fetch         = client.Fetch(
+				imap.SeqSetNum(msgSeqNum), &imap.FetchOptions{BodySection: entireMessage, UID: true, Envelope: true})
+		)
+		defer fetch.Close()
+
+		messages, err := fetch.Collect()
+		if err != nil {
+			log.Println("FETCH error:", err)
+			return nil, err
+		}
+
+		if len(messages) <= 0 {
+			return nil, nil
+		}
+
+		var (
+			msg   = messages[0]
+			msgId string
+		)
+
+		if msg.Envelope == nil {
+			msgId = noValidMessageId
+		} else {
+			msgId = msg.Envelope.MessageID
+		}
+
+		if _, exists := badMessageIDs[msgId]; exists {
+			// log.Printf("  Known bad message %s, skipping", msgId)
+		} else {
+			var data []byte
+			for _, buffer := range msg.BodySection {
+				data = append(data, buffer.Bytes...)
+			}
+
+			return &message{
+				msgId:    msgId,
+				uid:      msg.UID,
+				contents: data}, nil
+		}
+
+		msgSeqNum += 1
+		if (msgSeqNum > numMessages) {
+		   return nil, nil
+		}
 	}
-
-	if len(messages) <= 0 {
-		return nil, nil
-	}
-
-	var (
-		msg   = messages[0]
-		msgId string
-		data  []byte
-	)
-	for _, buffer := range msg.BodySection {
-		data = append(data, buffer.Bytes...)
-	}
-
-	if msg.Envelope == nil {
-		msgId = noValidMessageId
-	} else {
-		msgId = msg.Envelope.MessageID
-	}
-
-	return &message{
-		msgId:    msgId,
-		uid:      msg.UID,
-		contents: data}, nil
 }
 
 // An email fetched from an IMAP mailbox.  The contents will be uploaded to Gmail.  The other fields are just for logging
@@ -366,8 +394,39 @@ type message struct {
 	contents []byte
 }
 
-// Import this message to Gmail via media upload.
-func (m *message) importToGmail(mail *gmail.Service, labels ...string) error {
+// Return true if the error was logged/handled in here
+func maybeHandleGmailError(msgId string, err error) bool {
+	var googErr *googleapi.Error
+	if errors.As(err, &googErr) {
+		// Useful for debugging novel errors from Gmail
+		if false {
+			log.Printf("Gmail API Error Code: %d\n", googErr.Code)
+			log.Printf("Gmail API Error Message: \"%s\"\n", googErr.Message)
+			for _, e := range googErr.Errors {
+				log.Printf("  + Gmail API Error Reason: \"%s\", Message: \"%s\"\n", e.Reason, e.Message)
+			}
+		}
+
+		// Check for: "Error 400: Invalid attachment." (https://support.google.com/mail/answer/6590)
+		if googErr.Code == 400 && strings.HasPrefix(googErr.Message, "Invalid attachment.") {
+			if msgId != noValidMessageId {
+				log.Printf("Error: Invalid attachment not allowed by Gmail.  Not forwarding %s.  Ignoring.\n", msgId)
+				badMessageIDs[msgId] = struct{}{}
+				if count := len(badMessageIDs); count > badMessageLimit {
+					log.Print("Warning: More than %d Message-IDs tracked.  Probably time to clean out your mailboxes and restart turbogmailify",
+						badMessageLimit)
+				}
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// Import this message to Gmail via media upload.  Return (bool, error) to indicate if there
+// if the source message should be deleted, and if there was an unhandled error
+func (m *message) importToGmail(msgId string, mail *gmail.Service, labels ...string) (bool, error) {
 	r, err := mail.Users.Messages.
 		Import("me", &gmail.Message{LabelIds: append(labels, "UNREAD")}).
 		InternalDateSource("dateHeader").
@@ -379,17 +438,20 @@ func (m *message) importToGmail(mail *gmail.Service, labels ...string) error {
 			googleapi.ContentType("message/rfc822")).
 		Do()
 	if err != nil {
-		log.Println("Error uploading to Gmail:", err)
-		return err
+		if maybeHandleGmailError(msgId, err) {
+			return false, nil
+		}
+		log.Println("Gmail API Error:", err)
+		return false, err
 	}
 
 	if r.HTTPStatusCode != 200 {
-		err := fmt.Errorf("gmail returned status code: %v", r.HTTPStatusCode)
+		err := fmt.Errorf("Gmail returned status code: %v", r.HTTPStatusCode)
 		log.Println(err)
-		return err
+		return false, err
 	}
 
-	return nil
+	return true, nil
 }
 
 // Expunge a message from the inbox by UID.
