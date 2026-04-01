@@ -24,6 +24,9 @@ import (
 
 const maxPollTime = 5 * time.Minute
 
+// Placeholder Message ID for when an email has no Envelope at the source.
+const noValidMessageId = "no-envelope-no-msgid"
+
 func main() {
 	ctx := context.Background()
 
@@ -293,8 +296,8 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 				}
 
 				log.Printf(
-					"Importing message received by %s (uid %d, size %.1fK, folder %s)",
-					imap.Username, msg.uid, float32(len(msg.contents))/1024, folder)
+					"Importing message %s (%s %s #%d, %.1fK)",
+					msg.msgId, folder, imap.Username, msg.uid, float32(len(msg.contents))/1024)
 
 				if err := msg.importToGmail(mail, labels...); err != nil {
 					return err
@@ -320,7 +323,7 @@ func fetchFirstMessage(client *imapclient.Client) (*message, error) {
 		// message.
 		entireMessage = []*imap.FetchItemBodySection{{}}
 		fetch         = client.Fetch(
-			imap.SeqSetNum(1), &imap.FetchOptions{BodySection: entireMessage, UID: true})
+			imap.SeqSetNum(1), &imap.FetchOptions{BodySection: entireMessage, UID: true, Envelope: true})
 	)
 	defer fetch.Close()
 
@@ -335,19 +338,30 @@ func fetchFirstMessage(client *imapclient.Client) (*message, error) {
 	}
 
 	var (
-		msg  = messages[0]
-		data []byte
+		msg   = messages[0]
+		msgId string
+		data  []byte
 	)
 	for _, buffer := range msg.BodySection {
 		data = append(data, buffer.Bytes...)
 	}
+
+	if msg.Envelope == nil {
+		msgId = noValidMessageId
+	} else {
+		msgId = msg.Envelope.MessageID
+	}
+
 	return &message{
+		msgId:    msgId,
 		uid:      msg.UID,
 		contents: data}, nil
 }
 
-// An email fetched from an IMAP mailbox.
+// An email fetched from an IMAP mailbox.  The contents will be uploaded to Gmail.  The other fields are just for logging
+// about the upload.
 type message struct {
+	msgId    string
 	uid      imap.UID
 	contents []byte
 }
