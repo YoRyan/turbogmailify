@@ -102,10 +102,11 @@ func (c *config) writeTo(f *os.File) {
 
 // Information needed to connect to an IMAP server. Implicit TLS is mandatory.
 type imapCredentials struct {
-	Address  string
-	Username string
-	Password string
-	Folders  map[string][]string
+	Address    string
+	Username   string
+	Password   string
+	Folders    map[string][]string
+	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
 }
 
 // Obtain access to the Gmail API, refreshing and saving access tokens if
@@ -189,9 +190,31 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 		}
 	}
 
+	// Determine which folder to IDLE on. It must always be the last folder
+	// selected before IDLE — an extra SELECT between the drain loop and IDLE
+	// causes some servers (e.g. free.fr) to stop sending push notifications.
+	// We achieve this by draining all other folders first and the idle folder
+	// last, so no additional SELECT is needed after the loop.
+	var idleFolder string
+	if imap.IdleFolder == "" {
+		idleFolder = "INBOX"
+	} else {
+		idleFolder = imap.IdleFolder
+	}
+
+	orderedFolders := make([]string, 0, len(folders))
+	for folder := range folders {
+		if folder != idleFolder {
+			orderedFolders = append(orderedFolders, folder)
+		}
+	}
+	orderedFolders = append(orderedFolders, idleFolder)
+
 	for {
-		// Interrogate the inbox and retrieve and expunge everything inside.
-		for folder, labels := range folders {
+		// Interrogate each folder and retrieve and expunge everything inside.
+		// Idle folder is always last so it remains selected when we enter IDLE.
+		for _, folder := range orderedFolders {
+			labels := folders[folder]
 			for {
 				inbox, err := client.
 					Select(folder, nil).
