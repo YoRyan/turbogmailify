@@ -193,33 +193,31 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 	// Determine which folder to IDLE on. It must always be the last folder
 	// selected before IDLE — an extra SELECT between the drain loop and IDLE
 	// causes some servers (e.g. free.fr) to stop sending push notifications.
-	// We achieve this by draining all other folders first and WatchFolder last,
-	// so no additional SELECT is needed after the loop.
-	watchFolder := imap.IdleFolder
-	if watchFolder == "" {
-		watchFolder = "INBOX"
+	// We achieve this by draining all other folders first and the idle folder
+	// last, so no additional SELECT is needed after the loop.
+	var idleFolder string
+	if imap.IdleFolder == "" {
+		idleFolder = "INBOX"
+	} else {
+		idleFolder = imap.IdleFolder
 	}
 
-	// Build an ordered folder list: non-watch folders first, watch folder last.
-	type folderEntry struct {
-		name   string
-		labels []string
-	}
-	var orderedFolders []folderEntry
-	for folder, labels := range folders {
-		if folder != watchFolder {
-			orderedFolders = append(orderedFolders, folderEntry{folder, labels})
+	orderedFolders := make([]string, 0, len(folders))
+	for folder := range folders {
+		if folder != idleFolder {
+			orderedFolders = append(orderedFolders, folder)
 		}
 	}
-	orderedFolders = append(orderedFolders, folderEntry{watchFolder, folders[watchFolder]})
+	orderedFolders = append(orderedFolders, idleFolder)
 
 	for {
 		// Interrogate each folder and retrieve and expunge everything inside.
-		// WatchFolder is always last so it remains selected when we enter IDLE.
-		for _, entry := range orderedFolders {
+		// Idle folder is always last so it remains selected when we enter IDLE.
+		for _, folder := range orderedFolders {
+			labels := folders[folder]
 			for {
 				inbox, err := client.
-					Select(entry.name, nil).
+					Select(folder, nil).
 					Wait()
 				if err != nil {
 					log.Printf("SELECT error: %v", err)
@@ -240,9 +238,9 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 
 				log.Printf(
 					"Importing message received by %s (uid %d, size %.1fK, folder %s)",
-					imap.Username, msg.uid, float32(len(msg.contents))/1024, entry.name)
+					imap.Username, msg.uid, float32(len(msg.contents))/1024, folder)
 
-				if err := msg.importToGmail(mail, entry.labels...); err != nil {
+				if err := msg.importToGmail(mail, labels...); err != nil {
 					return err
 				}
 
@@ -252,7 +250,7 @@ func doSession(imap *imapCredentials, mail *gmail.Service) error {
 			}
 		}
 
-		// WatchFolder is already selected — go straight to IDLE.
+		// Go back to sleep until the next mailbox update.
 		if err := doIdle(client, mailboxUpdate, maxPollTime); err != nil {
 			return err
 		}
