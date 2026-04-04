@@ -138,10 +138,20 @@ WantedBy=multi-user.target
 A suggested Docker Compose service is as follows:
 
 ```yaml
+services:
   turbogmailify:
     image: ghcr.io/yoryan/turbogmailify
     container_name: turbogmailify
     restart: unless-stopped
-    volumes:
-      - ./turbogmailify.conf:/turbogmailify.conf:ro
+    configs:
+      - source: turbogmailify
+        target: /turbogmailify.conf
+configs:
+  turbogmailify:
+    content: |
+      {
+        "Imap": [ ... ]
+        "Secrets": { ... }
+        "Tokens": { ... }
+      }
 ```
