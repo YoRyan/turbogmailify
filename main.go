@@ -227,6 +227,13 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 	} else {
 		idleFolder = imap.IdleFolder
 	}
+	if _, idleFolderExists := folders[idleFolder]; !idleFolderExists {
+		// Well, we need to idle on some folder, so just pick one...
+		for folder := range folders {
+			idleFolder = folder
+			break
+		}
+	}
 
 	orderedFolders := make([]string, 0, len(folders))
 	for folder := range folders {
