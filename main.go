@@ -315,8 +315,8 @@ func fetchFirstMessage(client *imapclient.Client) (*message, error) {
 		msg  = messages[0]
 		data []byte
 	)
-	for _, sectionData := range msg.BodySection {
-		data = append(data, sectionData...)
+	for _, buffer := range msg.BodySection {
+		data = append(data, buffer.Bytes...)
 	}
 	return &message{
 		uid:      msg.UID,
