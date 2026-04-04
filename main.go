@@ -29,6 +29,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -44,7 +45,12 @@ import (
 const maxPollTime = 5 * time.Minute
 
 func main() {
+	doAuth := flag.Bool("auth", false, "Request access and refresh tokens from Google instead of processing mail.")
 	flag.Parse()
+
+	if flag.NArg() < 1 {
+		log.Fatalf("Did not pass path to configuration file.")
+	}
 
 	cfg := &config{}
 
@@ -62,14 +68,100 @@ func main() {
 			"IMAP credentials section is empty or not a JSON list")
 	}
 
-	mail := getGmailService(*cfg, f)
-	f.Close()
+	if cfg.Secrets == nil {
+		log.Fatalf("Failed to parse config file: " +
+			"Google credentials ('Secrets') are missing")
+	}
+
+	if *doAuth {
+		doRequestAuth(cfg)
+	} else {
+		doForwarding(cfg)
+	}
+}
+
+// Configuration file loaded from or saved to JSON.
+type config struct {
+	Imap    []imapCredentials
+	Secrets interface{}
+	Tokens  *oauth2.Token `json:",omitempty"`
+}
+
+func (c *config) getOAuthConfig() (oauth *oauth2.Config, err error) {
+	// Need to submit the client secret as JSON bytes, leading to this silly
+	// re-encode step.
+	secrets, err := json.Marshal(c.Secrets)
+	if err != nil {
+		return
+	}
+
+	oauth, err = google.ConfigFromJSON(secrets, gmail.GmailInsertScope)
+	return
+}
+
+// Information needed to connect to an IMAP server. Implicit TLS is mandatory.
+type imapCredentials struct {
+	Address    string
+	Username   string
+	Password   string
+	Folders    map[string][]string
+	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
+}
+
+// Run in request tokens mode.
+func doRequestAuth(c *config) {
+	oauth, err := c.getOAuthConfig()
+	if err != nil {
+		log.Fatalf("Unable to create Google OAuth2 client: %v", err)
+	}
+
+	authURL := oauth.AuthCodeURL("", oauth2.AccessTypeOffline)
+	fmt.Printf("Navigate to the following URL in your browser:\n%v\n", authURL)
+
+	var redirectURL string
+	fmt.Printf("\nOnce you've authorized the request, your browser will redirect to a URL that will not load. Paste the entire URL here:\n")
+	if _, err := fmt.Scan(&redirectURL); err != nil {
+		log.Fatalf("Unable to read redirected URL: %v", err)
+	}
+
+	parsedURL, err := url.Parse(redirectURL)
+	if err != nil {
+		log.Fatalf("Unable to parse redirected URL: %v", err)
+	}
+
+	tokens, err := oauth.Exchange(context.Background(), parsedURL.Query().Get("code"))
+	if err != nil {
+		log.Fatalf("Unable to retrieve tokens from Google: %v", err)
+	}
+
+	fmt.Printf("\nYour 'Tokens' section is as follows:\n")
+	if err := json.NewEncoder(os.Stdout).Encode(tokens); err != nil {
+		log.Fatalf("Error converting tokens to JSON: %v", err)
+	}
+}
+
+// Run in mail forwarding mode.
+func doForwarding(c *config) {
+	if c.Tokens == nil {
+		log.Fatalf("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
+	}
+
+	oauth, err := c.getOAuthConfig()
+	if err != nil {
+		log.Fatalf("Unable to create Google OAuth2 client: %v", err)
+	}
+
+	ctx := context.Background()
+	mail, err := gmail.NewService(ctx, option.WithHTTPClient(oauth.Client(ctx, c.Tokens)))
+	if err != nil {
+		log.Fatalf("Unable to create Gmail client: %v", err)
+	}
 
 	// Spin up a goroutine for each IMAP connection.
-	for _, imapCreds := range cfg.Imap {
+	for _, imapCreds := range c.Imap {
 		go func() {
 			for {
-				doSession(&imapCreds, mail)
+				doImapSession(&imapCreds, mail)
 
 				// Error'd out. Cool down and try again.
 				time.Sleep(maxPollTime)
@@ -82,74 +174,8 @@ func main() {
 	select {}
 }
 
-// Configuration file loaded from or saved to JSON.
-type config struct {
-	Imap    []imapCredentials
-	Secrets interface{}
-	Tokens  *oauth2.Token `json:",omitempty"`
-}
-
-// Save this configuration back to a JSON file.
-func (c *config) writeTo(f *os.File) {
-	if _, err := f.Seek(0, 0); err != nil {
-		log.Fatalf("Unable to seek config file: %v", err)
-	}
-
-	if err := json.NewEncoder(f).Encode(c); err != nil {
-		log.Fatalf("Unable to write back to config file: %v", err)
-	}
-}
-
-// Information needed to connect to an IMAP server. Implicit TLS is mandatory.
-type imapCredentials struct {
-	Address    string
-	Username   string
-	Password   string
-	Folders    map[string][]string
-	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
-}
-
-// Obtain access to the Gmail API, refreshing and saving access tokens if
-// needed.
-func getGmailService(cfg config, cfgFile *os.File) *gmail.Service {
-	ctx := context.Background()
-
-	// Need to submit the client secret as JSON bytes, leading to this silly
-	// re-encode step.
-	secrets, err := json.Marshal(cfg.Secrets)
-	if err != nil {
-		log.Fatalf("JSON re-encode error: %v", err)
-	}
-
-	oauth, err := google.ConfigFromJSON(secrets, gmail.GmailInsertScope)
-	if err != nil {
-		log.Fatalf("Unable to parse client secret to oauth2 config: %v", err)
-	}
-
-	// Attempt to retrieve stored access and refresh tokens; otherwise request
-	// them from Google.
-	var tok *oauth2.Token
-	if cfg.Tokens != nil {
-		tok = cfg.Tokens
-	} else {
-		tok = getTokenFromWeb(oauth)
-
-		cfg.Tokens = tok
-		cfg.writeTo(cfgFile)
-	}
-	client := oauth.Client(ctx, tok)
-
-	// Finally, create our Gmail client.
-	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
-	if err != nil {
-		log.Fatalf("Unable to retrieve Gmail client: %v", err)
-	}
-
-	return srv
-}
-
 // Make a new connection to the IMAP server and retrieve and expunge messages.
-func doSession(imap *imapCredentials, mail *gmail.Service) error {
+func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 	// Make a handler and channel to receive mailbox status updates.
 	var (
 		mailboxUpdate = make(chan *imapclient.UnilateralDataMailbox)
