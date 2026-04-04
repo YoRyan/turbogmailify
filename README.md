@@ -1,6 +1,6 @@
 # turbogmailify
 
-Turbogmailify is a small Go program that imports mail from external accounts into your Gmail inbox at near real-time speed. It can be used as a faster, better replacement for Gmail's built-in POP3 importer, which was sunset in January 2026.
+Turbogmailify is a small Go program that imports mail from external accounts into your Gmail inbox at near real-time speed. It can be used as a faster, better replacement for Gmail's built-in POP3 importer, which was sunset in January 2026.  Compare to [Gomailify](https://www.gomailify.com/) and [Fetch2Gmail](https://github.com/threehappypenguins/fetch2gmail).
 
 Turbogmailify:
 
