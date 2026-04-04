@@ -54,7 +54,7 @@ func main() {
 
 	cfg := &config{}
 
-	f, err := os.OpenFile(flag.Arg(0), os.O_RDWR, 0600)
+	f, err := os.OpenFile(flag.Arg(0), os.O_RDONLY, 0600)
 	if err != nil {
 		log.Fatalf("Failed to open config file: %v", err)
 	}
