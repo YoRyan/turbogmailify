@@ -68,7 +68,7 @@ type config struct {
 	Tokens  *oauth2.Token `json:",omitempty"`
 }
 
-func (c *config) getOAuthConfig() (oauth *oauth2.Config, err error) {
+func (c *config) getOAuthConfig(scopes ...string) (oa *oauth2.Config) {
 	// Need to submit the client secret as JSON bytes, leading to this silly
 	// re-encode step.
 	secrets, err := json.Marshal(c.Secrets)
@@ -76,7 +76,10 @@ func (c *config) getOAuthConfig() (oauth *oauth2.Config, err error) {
 		return
 	}
 
-	oauth, err = google.ConfigFromJSON(secrets, gmail.GmailInsertScope)
+	oa, err = google.ConfigFromJSON(secrets, scopes...)
+	if err != nil {
+		log.Fatalln("Unable to create Google OAuth2 client:", err)
+	}
 	return
 }
 
@@ -91,12 +94,9 @@ type imapCredentials struct {
 
 // Run in request tokens mode.
 func doRequestAuth(ctx context.Context, c *config) {
-	oauth, err := c.getOAuthConfig()
-	if err != nil {
-		log.Fatalln("Unable to create Google OAuth2 client:", err)
-	}
+	oa := c.getOAuthConfig(gmail.GmailInsertScope)
 
-	authURL := oauth.AuthCodeURL("", oauth2.AccessTypeOffline)
+	authURL := oa.AuthCodeURL("", oauth2.AccessTypeOffline)
 	fmt.Println("Navigate to the following URL in your browser:")
 	fmt.Println(authURL)
 
@@ -112,7 +112,7 @@ func doRequestAuth(ctx context.Context, c *config) {
 		log.Fatalln("Unable to parse redirected URL:", err)
 	}
 
-	tokens, err := oauth.Exchange(ctx, parsedURL.Query().Get("code"))
+	tokens, err := oa.Exchange(ctx, parsedURL.Query().Get("code"))
 	if err != nil {
 		log.Fatalln("Unable to retrieve tokens from Google:", err)
 	}
@@ -130,12 +130,9 @@ func doForwarding(ctx context.Context, c *config) {
 		log.Fatalln("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
 	}
 
-	oauth, err := c.getOAuthConfig()
-	if err != nil {
-		log.Fatalln("Unable to create Google OAuth2 client:", err)
-	}
+	oa := c.getOAuthConfig(gmail.GmailInsertScope)
 
-	mail, err := gmail.NewService(ctx, option.WithHTTPClient(oauth.Client(ctx, c.Tokens)))
+	mail, err := gmail.NewService(ctx, option.WithHTTPClient(oa.Client(ctx, c.Tokens)))
 	if err != nil {
 		log.Fatalln("Unable to create Gmail client:", err)
 	}
