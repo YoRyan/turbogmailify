@@ -45,6 +45,8 @@ import (
 const maxPollTime = 5 * time.Minute
 
 func main() {
+	ctx := context.Background()
+
 	var doAuth bool
 	flag.BoolVar(&doAuth, "auth", false, "Request access and refresh tokens from Google instead of processing mail.")
 	flag.Parse()
@@ -75,9 +77,9 @@ func main() {
 	}
 
 	if doAuth {
-		doRequestAuth(cfg)
+		doRequestAuth(ctx, cfg)
 	} else {
-		doForwarding(cfg)
+		doForwarding(ctx, cfg)
 	}
 }
 
@@ -110,7 +112,7 @@ type imapCredentials struct {
 }
 
 // Run in request tokens mode.
-func doRequestAuth(c *config) {
+func doRequestAuth(ctx context.Context, c *config) {
 	oauth, err := c.getOAuthConfig()
 	if err != nil {
 		log.Fatalln("Unable to create Google OAuth2 client:", err)
@@ -132,7 +134,7 @@ func doRequestAuth(c *config) {
 		log.Fatalln("Unable to parse redirected URL:", err)
 	}
 
-	tokens, err := oauth.Exchange(context.Background(), parsedURL.Query().Get("code"))
+	tokens, err := oauth.Exchange(ctx, parsedURL.Query().Get("code"))
 	if err != nil {
 		log.Fatalln("Unable to retrieve tokens from Google:", err)
 	}
@@ -145,7 +147,7 @@ func doRequestAuth(c *config) {
 }
 
 // Run in mail forwarding mode.
-func doForwarding(c *config) {
+func doForwarding(ctx context.Context, c *config) {
 	if c.Tokens == nil {
 		log.Fatalln("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
 	}
@@ -155,7 +157,6 @@ func doForwarding(c *config) {
 		log.Fatalln("Unable to create Google OAuth2 client:", err)
 	}
 
-	ctx := context.Background()
 	mail, err := gmail.NewService(ctx, option.WithHTTPClient(oauth.Client(ctx, c.Tokens)))
 	if err != nil {
 		log.Fatalln("Unable to create Gmail client:", err)
