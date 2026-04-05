@@ -21,9 +21,10 @@ The setup process is very similar to that of [gogcli](https://github.com/steipet
 
 1. [Create](https://console.cloud.google.com/projectcreate) a project for your Turbogmailify instance in Google Cloud Console.
 2. [Enable](https://console.cloud.google.com/apis/api/gmail.googleapis.com) the Gmail API for this project.
-3. Your project will be initialized in the "Testing" state. You'll have to [add](https://console.cloud.google.com/auth/audience) yourself (or whichever Google account you want to forward mail to) as a test user.
-4. [Create](https://console.cloud.google.com/auth/clients) a new client for your project. Choose the "Desktop" type.
-5. Download the JSON secrets file that Google provides for your client.
+3. [Configure](https://console.cloud.google.com/auth/branding) your project's OAuth branding. Personal Google accounts can only create "external" projects, but this is okay.
+4. Your project will be initialized in the "Testing" state. You'll have to [add](https://console.cloud.google.com/auth/audience) yourself (or whichever Google account you want to forward mail to) as a test user.
+5. [Create](https://console.cloud.google.com/auth/clients) a new client for your project. Choose the "Desktop" type.
+6. Download the JSON secrets file that Google provides for your client.
 
 ### Write the configuration file
 
