@@ -49,27 +49,27 @@ func main() {
 	flag.Parse()
 
 	if flag.NArg() < 1 {
-		log.Fatalf("Did not pass path to configuration file.")
+		log.Fatalln("Did not pass path to configuration file.")
 	}
 
 	cfg := &config{}
 
 	f, err := os.OpenFile(flag.Arg(0), os.O_RDONLY, 0600)
 	if err != nil {
-		log.Fatalf("Failed to open config file: %v", err)
+		log.Fatalln("Failed to open config file:", err)
 	}
 
 	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
-		log.Fatalf("Failed to parse config file: %v", err)
+		log.Fatalln("Failed to parse config file:", err)
 	}
 
 	if len(cfg.Imap) <= 0 {
-		log.Fatalf("Failed to parse config file: " +
+		log.Fatalln("Failed to parse config file:",
 			"IMAP credentials section is empty or not a JSON list")
 	}
 
 	if cfg.Secrets == nil {
-		log.Fatalf("Failed to parse config file: " +
+		log.Fatalln("Failed to parse config file:",
 			"Google credentials ('Secrets') are missing")
 	}
 
@@ -112,49 +112,52 @@ type imapCredentials struct {
 func doRequestAuth(c *config) {
 	oauth, err := c.getOAuthConfig()
 	if err != nil {
-		log.Fatalf("Unable to create Google OAuth2 client: %v", err)
+		log.Fatalln("Unable to create Google OAuth2 client:", err)
 	}
 
 	authURL := oauth.AuthCodeURL("", oauth2.AccessTypeOffline)
-	fmt.Printf("Navigate to the following URL in your browser:\n%v\n", authURL)
+	fmt.Println("Navigate to the following URL in your browser:")
+	fmt.Println(authURL)
 
 	var redirectURL string
-	fmt.Printf("\nOnce you've authorized the request, your browser will redirect to a URL that will not load. Paste the entire URL here:\n")
+	fmt.Println("")
+	fmt.Println("Once you've authorized the request, your browser will redirect to an http://localhost URL that will fail to load. Paste the entire URL here:")
 	if _, err := fmt.Scan(&redirectURL); err != nil {
-		log.Fatalf("Unable to read redirected URL: %v", err)
+		log.Fatalln("Unable to read redirected URL:", err)
 	}
 
 	parsedURL, err := url.Parse(redirectURL)
 	if err != nil {
-		log.Fatalf("Unable to parse redirected URL: %v", err)
+		log.Fatalln("Unable to parse redirected URL:", err)
 	}
 
 	tokens, err := oauth.Exchange(context.Background(), parsedURL.Query().Get("code"))
 	if err != nil {
-		log.Fatalf("Unable to retrieve tokens from Google: %v", err)
+		log.Fatalln("Unable to retrieve tokens from Google:", err)
 	}
 
-	fmt.Printf("\nYour 'Tokens' section is as follows:\n")
+	fmt.Println("")
+	fmt.Println("Your 'Tokens' section is as follows:")
 	if err := json.NewEncoder(os.Stdout).Encode(tokens); err != nil {
-		log.Fatalf("Error converting tokens to JSON: %v", err)
+		log.Fatalln("Error converting tokens to JSON:", err)
 	}
 }
 
 // Run in mail forwarding mode.
 func doForwarding(c *config) {
 	if c.Tokens == nil {
-		log.Fatalf("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
+		log.Fatalln("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
 	}
 
 	oauth, err := c.getOAuthConfig()
 	if err != nil {
-		log.Fatalf("Unable to create Google OAuth2 client: %v", err)
+		log.Fatalln("Unable to create Google OAuth2 client:", err)
 	}
 
 	ctx := context.Background()
 	mail, err := gmail.NewService(ctx, option.WithHTTPClient(oauth.Client(ctx, c.Tokens)))
 	if err != nil {
-		log.Fatalf("Unable to create Gmail client: %v", err)
+		log.Fatalln("Unable to create Gmail client:", err)
 	}
 
 	// Spin up a goroutine for each IMAP connection.
@@ -170,7 +173,7 @@ func doForwarding(c *config) {
 	}
 
 	// Put the main goroutine to sleep.
-	log.Printf("Startup complete; waiting for mail")
+	log.Println("Startup complete; waiting for mail")
 	select {}
 }
 
@@ -192,7 +195,7 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 	client, err := imapclient.DialTLS(
 		imap.Address, &imapclient.Options{UnilateralDataHandler: dataHandler})
 	if err != nil {
-		log.Printf("Error connecting to IMAP server: %v", err)
+		log.Println("Error connecting to IMAP server:", err)
 		return err
 	}
 	defer client.Close()
@@ -202,7 +205,7 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 		Login(imap.Username, imap.Password).
 		Wait(); err != nil {
 
-		log.Printf("LOGIN error: %v", err)
+		log.Println("LOGIN error:", err)
 		return err
 	}
 
@@ -253,7 +256,7 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 					Select(folder, nil).
 					Wait()
 				if err != nil {
-					log.Printf("SELECT error: %v", err)
+					log.Println("SELECT error:", err)
 					return err
 				}
 
@@ -303,7 +306,7 @@ func fetchFirstMessage(client *imapclient.Client) (*message, error) {
 
 	messages, err := fetch.Collect()
 	if err != nil {
-		log.Printf("FETCH error: %v", err)
+		log.Println("FETCH error:", err)
 		return nil, err
 	}
 
@@ -342,13 +345,13 @@ func (m *message) importToGmail(mail *gmail.Service, labels ...string) error {
 			googleapi.ContentType("message/rfc822")).
 		Do()
 	if err != nil {
-		log.Printf("Error uploading to Gmail: %v", err)
+		log.Println("Error uploading to Gmail:", err)
 		return err
 	}
 
 	if r.HTTPStatusCode != 200 {
 		err := fmt.Errorf("gmail returned status code: %v", r.HTTPStatusCode)
-		log.Printf("%v", err)
+		log.Println(err)
 		return err
 	}
 
@@ -368,7 +371,7 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 		Store(setNum, addDeleted, nil).
 		Close(); err != nil {
 
-		log.Printf("STORE error: %v", err)
+		log.Println("STORE error:", err)
 		return err
 	}
 
@@ -376,7 +379,7 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 		Expunge().
 		Close(); err != nil {
 
-		log.Printf("EXPUNGE error: %v", err)
+		log.Println("EXPUNGE error:", err)
 		return err
 	}
 
@@ -392,7 +395,7 @@ func doIdle(
 ) error {
 	idle, err := client.Idle()
 	if err != nil {
-		log.Printf("IDLE error: %v", err)
+		log.Println("IDLE error:", err)
 		return err
 	}
 
@@ -404,12 +407,12 @@ func doIdle(
 	}
 
 	if err := idle.Close(); err != nil {
-		log.Printf("IDLE error: %v", err)
+		log.Println("IDLE error:", err)
 		return err
 	}
 
 	if err := idle.Wait(); err != nil {
-		log.Printf("IDLE error: %v", err)
+		log.Println("IDLE error:", err)
 		return err
 	}
 
