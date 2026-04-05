@@ -45,7 +45,8 @@ import (
 const maxPollTime = 5 * time.Minute
 
 func main() {
-	doAuth := flag.Bool("auth", false, "Request access and refresh tokens from Google instead of processing mail.")
+	var doAuth bool
+	flag.BoolVar(&doAuth, "auth", false, "Request access and refresh tokens from Google instead of processing mail.")
 	flag.Parse()
 
 	if flag.NArg() < 1 {
@@ -73,7 +74,7 @@ func main() {
 			"Google credentials ('Secrets') are missing")
 	}
 
-	if *doAuth {
+	if doAuth {
 		doRequestAuth(cfg)
 	} else {
 		doForwarding(cfg)
