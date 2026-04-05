@@ -64,7 +64,7 @@ func main() {
 // Configuration file loaded from or saved to JSON.
 type config struct {
 	Imap    []imapCredentials
-	Secrets interface{}
+	Secrets any
 	Tokens  *oauth2.Token `json:",omitempty"`
 }
 
