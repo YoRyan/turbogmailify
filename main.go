@@ -68,7 +68,7 @@ type config struct {
 	Tokens  *oauth2.Token `json:",omitempty"`
 }
 
-func (c *config) getOAuthConfig(scopes ...string) (oa *oauth2.Config) {
+func (c *config) getOAuthConfig() (oa *oauth2.Config) {
 	// Need to submit the client secret as JSON bytes, leading to this silly
 	// re-encode step.
 	secrets, err := json.Marshal(c.Secrets)
@@ -76,7 +76,7 @@ func (c *config) getOAuthConfig(scopes ...string) (oa *oauth2.Config) {
 		return
 	}
 
-	oa, err = google.ConfigFromJSON(secrets, scopes...)
+	oa, err = google.ConfigFromJSON(secrets, gmail.GmailInsertScope)
 	if err != nil {
 		log.Fatalln("Unable to create Google OAuth2 client:", err)
 	}
@@ -94,7 +94,7 @@ type imapCredentials struct {
 
 // Run in request tokens mode.
 func doRequestAuth(ctx context.Context, c *config) {
-	oa := c.getOAuthConfig(gmail.GmailInsertScope)
+	oa := c.getOAuthConfig()
 
 	authURL := oa.AuthCodeURL("", oauth2.AccessTypeOffline)
 	fmt.Println("Navigate to the following URL in your browser:")
@@ -130,7 +130,7 @@ func doForwarding(ctx context.Context, c *config) {
 		log.Fatalln("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
 	}
 
-	oa := c.getOAuthConfig(gmail.GmailInsertScope)
+	oa := c.getOAuthConfig()
 
 	mail, err := gmail.NewService(ctx, option.WithHTTPClient(oa.Client(ctx, c.Tokens)))
 	if err != nil {
