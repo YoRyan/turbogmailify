@@ -35,12 +35,12 @@ func main() {
 
 	cfg := &config{}
 
-	f, err := os.OpenFile(flag.Arg(0), os.O_RDONLY, 0600)
+	b, err := os.ReadFile(flag.Arg(0))
 	if err != nil {
 		log.Fatalln("Failed to open config file:", err)
 	}
 
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+	if err := json.Unmarshal(b, cfg); err != nil {
 		log.Fatalln("Failed to parse config file:", err)
 	}
 
