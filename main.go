@@ -9,10 +9,12 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/gmail/v1"
@@ -25,23 +27,52 @@ const maxPollTime = 5 * time.Minute
 func main() {
 	ctx := context.Background()
 
-	var doAuth bool
+	var (
+		doAuth  bool
+		useToml bool
+	)
 	flag.BoolVar(&doAuth, "auth", false, "Request access and refresh tokens from Google instead of processing mail.")
+	flag.BoolVar(&useToml, "toml", false, "Process the configuration file as a TOML file, with the Secrets and Tokens sections as strings.")
 	flag.Parse()
 
 	if flag.NArg() < 1 {
 		log.Fatalln("Did not pass path to configuration file.")
 	}
 
+	path := flag.Arg(0)
 	cfg := &config{}
 
-	b, err := os.ReadFile(flag.Arg(0))
+	b, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatalln("Failed to open config file:", err)
 	}
 
-	if err := json.Unmarshal(b, cfg); err != nil {
-		log.Fatalln("Failed to parse config file:", err)
+	if useToml {
+		tomlCfg := &tomlConfig{}
+		if err := toml.Unmarshal(b, tomlCfg); err != nil {
+			log.Fatalln("Failed to parse config file:", err)
+		}
+
+		cfg.Imap = tomlCfg.Imap
+
+		if tomlCfg.Secrets != "" {
+			if err := json.NewDecoder(strings.NewReader(tomlCfg.Secrets)).Decode(&cfg.Secrets); err != nil {
+				log.Fatalln("Unable to decode embedded JSON 'Secrets' section:", err)
+			}
+		} else {
+			log.Fatalln("Failed to parse config file:",
+				"Google credentials ('Secrets') are missing")
+		}
+
+		if tomlCfg.Tokens != "" {
+			if err := json.NewDecoder(strings.NewReader(tomlCfg.Tokens)).Decode(&cfg.Tokens); err != nil {
+				log.Fatalln("Unable to decode embedded JSON 'Tokens' section:", err)
+			}
+		}
+	} else {
+		if err := json.Unmarshal(b, cfg); err != nil {
+			log.Fatalln("Failed to parse config file:", err)
+		}
 	}
 
 	if len(cfg.Imap) <= 0 {
@@ -61,7 +92,14 @@ func main() {
 	}
 }
 
-// Configuration file loaded from or saved to JSON.
+// Configuration file loaded from TOML.
+type tomlConfig struct {
+	Imap    []imapCredentials
+	Secrets string
+	Tokens  string
+}
+
+// Configuration file loaded from JSON.
 type config struct {
 	Imap    []imapCredentials
 	Secrets any
