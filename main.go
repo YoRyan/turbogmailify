@@ -103,7 +103,7 @@ type tomlConfig struct {
 type config struct {
 	Imap    []imapCredentials
 	Secrets any
-	Tokens  *oauth2.Token `json:",omitempty"`
+	Tokens  *oauth2.Token
 }
 
 func (c *config) getOAuthConfig() (oa *oauth2.Config) {
