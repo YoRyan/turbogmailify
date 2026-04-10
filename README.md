@@ -1,17 +1,40 @@
 # turbogmailify
 
-Turbogmailify is a small Go program that imports mail from external accounts into your Gmail inbox at near real-time speed. It can be used as a faster, better replacement for Gmail's built-in POP3 importer, which was sunset in January 2026.  Compare to [Gomailify](https://www.gomailify.com/) and [Fetch2Gmail](https://github.com/threehappypenguins/fetch2gmail).
+Turbogmailify is a self-hosted replacement for Gmail's built-in POP3 importer, which was sunset in January 2026. It collects emails from IMAP servers and imports them using Google's official [Gmail API](https://developers.google.com/workspace/gmail/api/guides). In addition to still being available, Turbogmailify is also much faster and more flexible compared to Google's former POP importer.
 
-Turbogmailify:
+### Features and limitations
 
-- Connects via IMAP and takes advantage of the IDLE command to achieve nearly instantaneous detection of new emails.
-- Expunges messages from the external server once they have been successfully uploaded to Gmail, exactly as what happened with a POP3 import.
-- Doesn't use email forwarding, so messages won't be lost to Google's spam protection.
-- Is small and easy to deploy on any home server or VPS.
+✅ Speed: Turbogmailify polls your IMAP inbox every few minutes, as opposed to Google's POP importer, which was notorious for taking up to an hour between refreshes. On many IMAP servers, Turbogmailify can take advantage of the IDLE command to achieve instantaneous detection of new emails.
 
-Unfortunately, using the Gmail API to [import](https://developers.google.com/gmail/api/reference/rest/v1/users.messages/import) messages in this manner bypasses Gmail's automatic spam detection and message filtering features. But otherwise, this is pretty close the holy grail of Gmail integration with non-Gmail accounts: instant delivery, *without* resorting to email forwarding and the unreliability that entails.
+✅ Flexibility: You can configure Turbogmailify to check multiple IMAP accounts and apply custom labels to the emails it imports.
 
-For more background information about why I created this program, you can check out my relevant blog [post](https://youngryan.com/2024/check-emails-from-gmail-briskly-go-getmail/).
+✅ Reliability: The final import step, expunging the original message from the IMAP inbox, is executed by Turbogmailify if and only if the message has been successfully imported into Gmail. Turbogmailify checks the Junk folder, too, so you won't lose any important messages that have been marked false positives.
+
+⚒️ Classification: Gmail's label classification seems to work only sporadically on imported emails, and custom Gmail filters won't run at all. Consider using your IMAP inbox's filters, if available, as an alternative.
+
+⚒️ Spam Filtering: Gmail's spam filter doesn't run on imported emails. But by applying the Spam label to emails that have been placed in the IMAP Junk folder, Turbogmailify can piggyback on the spam filter equipped by your IMAP inbox.
+
+### FAQ
+
+#### Why not just forward email to my Gmail inbox?
+
+If you just forward your emails over the email network, Google has a habit of silently dropping messages that look like spam, including false positives. Such "spam" will also count against your domain's trustworthiness score, making it all the more harder for subsequent messages to get through. In short, email forwarding, the obvious solution, leads inevitably to a downward spiral of unreliable delivery.
+
+#### What about paid services? [Gomailify](https://www.gomailify.com/)? [Postdirect](https://postdirect.net/mailbox)?
+
+Paying somebody to provide this service for you is certainly easier than deploying a solution like Turbogmailify. But if you have the skills to run self-hosted software, why not cut out the middleman? This is your private email we're talking about, after all—some of your most sensitive personal communications.
+
+If running cost is a concern, you don't necessarily need to pay for a VPS just to run Turbogmailify. Your IMAP inbox is already doing the heavy lifting of maintaining multiple 9's of availability to receive email, so a forwarder like Turbogmailify just needs be available *most* of the time. A home server with a residential Internet connection will do just fine.
+
+#### What about other self-hosted solutions? [Fetch2Gmail](https://github.com/threehappypenguins/fetch2gmail)? [InboxBridge](https://github.com/tdferreira/inboxbridge)?
+
+Brevity is the soul of wit: Turbogmailify accomplishes everything it needs to do in less than 500 lines of easily auditable Go code (reputable imports excepted). There are no web UI's, SQL databases, or giant LLM-written commits here. As of April 2026, Turbogmailify also includes key features that Fetch2Gmail does not, such as support for IMAP IDLE, support for IMAP folders, and support for Gmail labels.
+
+Turbogmailify's development history dates back to [2024](https://youngryan.com/2024/check-emails-from-gmail-briskly-go-getmail/) and has served as the author's principal way to import email since then. Knock on wood, it has yet to lose a single message.
+
+#### What about IMAP to IMAP syncing? [imapsync](https://imapsync.lamiral.info/)? [Magpie](https://github.com/FynleyMsg/Magpie)?
+
+Turbogmailify is engineered specifically for Gmail and supports Gmail's OAuth flow and labels system. Interacting with a Gmail inbox as if it were just an ordinary IMAP server will always result in some level of friction.
 
 ## Usage
 
