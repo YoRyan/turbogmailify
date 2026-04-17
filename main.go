@@ -123,11 +123,12 @@ func (c *config) getOAuthConfig() (oa *oauth2.Config) {
 
 // Information needed to connect to an IMAP server. Implicit TLS is mandatory.
 type imapCredentials struct {
-	Address    string
-	Username   string
-	Password   string
-	Folders    map[string][]string
-	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
+	Address       string
+	Username      string
+	Password      string
+	Folders       map[string][]string
+	IdleFolder    string // folder to IDLE on; defaults to "INBOX" if empty
+	ArchiveFolder string
 }
 
 // Run in request tokens mode.
@@ -295,7 +296,11 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 					return err
 				}
 
-				if err := deleteMessage(client, msg.uid); err != nil {
+				if imap.ArchiveFolder != "" {
+					if err := archiveMessage(client, msg.uid, imap.ArchiveFolder); err != nil {
+						return err
+					}
+				} else if err := deleteMessage(client, msg.uid); err != nil {
 					return err
 				}
 			}
@@ -395,6 +400,18 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 		Close(); err != nil {
 
 		log.Println("EXPUNGE error:", err)
+		return err
+	}
+
+	return nil
+}
+
+// Move a message to the given folder by UID.
+func archiveMessage(client *imapclient.Client, uid imap.UID, folder string) error {
+	setNum := imap.UIDSetNum(uid)
+	_, err := client.Move(setNum, folder).Wait()
+	if err != nil {
+		log.Println("MOVE error:", err)
 		return err
 	}
 
