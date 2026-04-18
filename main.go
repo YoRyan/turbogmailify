@@ -150,7 +150,12 @@ func doRequestAuth(ctx context.Context, c *config) {
 		log.Fatalln("Unable to parse redirected URL:", err)
 	}
 
-	tokens, err := oa.Exchange(ctx, parsedURL.Query().Get("code"))
+	authCode := parsedURL.Query().Get("code")
+	if authCode == "" {
+		log.Fatalln("URL does not look like it contains a Google code:", "missing 'code' value in query string")
+	}
+
+	tokens, err := oa.Exchange(ctx, authCode)
 	if err != nil {
 		log.Fatalln("Unable to retrieve tokens from Google:", err)
 	}
