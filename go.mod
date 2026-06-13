@@ -1,4 +1,4 @@
-module turbogmailify
+module github.com/YoRyan/turbogmailify
 
 go 1.25.8
 
