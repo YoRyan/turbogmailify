@@ -94,16 +94,24 @@ func main() {
 
 // Configuration file loaded from TOML.
 type tomlConfig struct {
-	Imap    []imapCredentials
+	Imap    []configImap
 	Secrets string
 	Tokens  string
 }
 
 // Configuration file loaded from JSON.
 type config struct {
-	Imap    []imapCredentials
+	Imap    []configImap
 	Secrets any
 	Tokens  *oauth2.Token
+}
+
+type configImap struct {
+	Address    string
+	Username   string
+	Password   string
+	Folders    map[string][]string
+	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
 }
 
 func (c *config) getOAuthConfig() (oa *oauth2.Config) {
@@ -119,15 +127,6 @@ func (c *config) getOAuthConfig() (oa *oauth2.Config) {
 		log.Fatalln("Unable to create Google OAuth2 client:", err)
 	}
 	return
-}
-
-// Information needed to connect to an IMAP server. Implicit TLS is mandatory.
-type imapCredentials struct {
-	Address    string
-	Username   string
-	Password   string
-	Folders    map[string][]string
-	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
 }
 
 // Run in request tokens mode.
@@ -175,16 +174,27 @@ func doForwarding(ctx context.Context, c *config) {
 
 	oa := c.getOAuthConfig()
 
-	mail, err := gmail.NewService(ctx, option.WithHTTPClient(oa.Client(ctx, c.Tokens)))
+	gmService, err := gmail.NewService(ctx, option.WithHTTPClient(oa.Client(ctx, c.Tokens)))
 	if err != nil {
 		log.Fatalln("Unable to create Gmail client:", err)
 	}
+	gmInbox := (*gmailInboxReal)(gmService)
 
 	// Spin up a goroutine for each IMAP connection.
-	for _, imapCreds := range c.Imap {
+	for _, ic := range c.Imap {
 		go func() {
 			for {
-				doImapSession(&imapCreds, mail)
+				s, err := createSession(&ic)
+				if err != nil {
+					continue
+				}
+
+				forwardConfig := createForwardConfig(&ic)
+				for {
+					if err := s.forwardAndIdle(forwardConfig, gmInbox); err != nil {
+						break
+					}
+				}
 
 				// Error'd out. Cool down and try again.
 				time.Sleep(maxPollTime)
@@ -197,8 +207,64 @@ func doForwarding(ctx context.Context, c *config) {
 	select {}
 }
 
-// Make a new connection to the IMAP server and retrieve and expunge messages.
-func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
+type forwardConfig struct {
+	Id                  string
+	FolderToLabels      map[string][]string
+	FolderOrderIdleLast []string
+}
+
+func createForwardConfig(c *configImap) forwardConfig {
+	var folders map[string][]string
+	if len(c.Folders) > 0 {
+		folders = c.Folders
+	} else {
+		folders = map[string][]string{
+			"INBOX": {"INBOX"},
+			"Junk":  {"SPAM"},
+		}
+	}
+
+	// Determine which folder to IDLE on. It must always be the last folder
+	// selected before IDLE — an extra SELECT between the drain loop and IDLE
+	// causes some servers (e.g. free.fr) to stop sending push notifications.
+	// We achieve this by draining all other folders first and the idle folder
+	// last, so no additional SELECT is needed after the loop.
+	var idle string
+	if c.IdleFolder != "" {
+		idle = c.IdleFolder
+	} else {
+		idle = "INBOX"
+	}
+	if _, exists := folders[idle]; !exists {
+		// Well, we need to idle on some folder, so just pick one...
+		for folder := range folders {
+			idle = folder
+			break
+		}
+	}
+
+	ordered := make([]string, 0, len(folders))
+	for folder := range folders {
+		if folder != idle {
+			ordered = append(ordered, folder)
+		}
+	}
+	ordered = append(ordered, idle)
+
+	return forwardConfig{
+		Id:                  c.Username,
+		FolderToLabels:      folders,
+		FolderOrderIdleLast: ordered,
+	}
+}
+
+type session struct {
+	client        *imapclient.Client
+	mailboxUpdate <-chan *imapclient.UnilateralDataMailbox
+	idleDeadline  time.Duration
+}
+
+func createSession(c *configImap) (*session, error) {
 	// Make a handler and channel to receive mailbox status updates.
 	var (
 		mailboxUpdate = make(chan *imapclient.UnilateralDataMailbox)
@@ -212,114 +278,81 @@ func doImapSession(imap *imapCredentials, mail *gmail.Service) error {
 	)
 
 	// Open the connection.
-	client, err := imapclient.DialTLS(
-		imap.Address, &imapclient.Options{UnilateralDataHandler: dataHandler})
+	client, err := imapclient.DialTLS(c.Address, &imapclient.Options{UnilateralDataHandler: dataHandler})
 	if err != nil {
 		log.Println("Error connecting to IMAP server:", err)
-		return err
+		return nil, err
 	}
-	defer client.Close()
 
 	// Provide credentials.
 	if err := client.
-		Login(imap.Username, imap.Password).
+		Login(c.Username, c.Password).
 		Wait(); err != nil {
 
 		log.Println("LOGIN error:", err)
+		client.Close()
+		return nil, err
+	}
+
+	return &session{client, mailboxUpdate, maxPollTime}, nil
+}
+
+// Make a new connection to the IMAP server and retrieve and expunge messages.
+func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
+	// Interrogate each folder and retrieve and expunge everything inside.
+	// Idle folder is always last so it remains selected when we enter IDLE.
+	for _, folder := range f.FolderOrderIdleLast {
+		labels := f.FolderToLabels[folder]
+		for {
+			inbox, err := s.client.
+				Select(folder, nil).
+				Wait()
+			if err != nil {
+				log.Println("SELECT error:", err)
+				return err
+			}
+
+			if inbox.NumMessages <= 0 {
+				break
+			}
+
+			uid, envelope, err := s.fetchFirstMessage()
+			if err != nil {
+				return err
+			}
+			if envelope == nil {
+				break
+			}
+
+			log.Printf(
+				"Importing message received by %s (uid %d, size %.1fK, folder %s)",
+				f.Id, uid, float32(len(envelope))/1024, folder)
+
+			if err := gm.DoImport(envelope, labels...); err != nil {
+				return err
+			}
+
+			if err := s.deleteMessage(uid); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Go back to sleep until the next mailbox update.
+	if err := s.doIdle(); err != nil {
 		return err
 	}
 
-	var folders map[string][]string
-	if len(imap.Folders) > 0 {
-		folders = imap.Folders
-	} else {
-		folders = map[string][]string{
-			"INBOX": {"INBOX"},
-			"Junk":  {"SPAM"},
-		}
-	}
-
-	// Determine which folder to IDLE on. It must always be the last folder
-	// selected before IDLE — an extra SELECT between the drain loop and IDLE
-	// causes some servers (e.g. free.fr) to stop sending push notifications.
-	// We achieve this by draining all other folders first and the idle folder
-	// last, so no additional SELECT is needed after the loop.
-	var idleFolder string
-	if imap.IdleFolder == "" {
-		idleFolder = "INBOX"
-	} else {
-		idleFolder = imap.IdleFolder
-	}
-	if _, idleFolderExists := folders[idleFolder]; !idleFolderExists {
-		// Well, we need to idle on some folder, so just pick one...
-		for folder := range folders {
-			idleFolder = folder
-			break
-		}
-	}
-
-	orderedFolders := make([]string, 0, len(folders))
-	for folder := range folders {
-		if folder != idleFolder {
-			orderedFolders = append(orderedFolders, folder)
-		}
-	}
-	orderedFolders = append(orderedFolders, idleFolder)
-
-	for {
-		// Interrogate each folder and retrieve and expunge everything inside.
-		// Idle folder is always last so it remains selected when we enter IDLE.
-		for _, folder := range orderedFolders {
-			labels := folders[folder]
-			for {
-				inbox, err := client.
-					Select(folder, nil).
-					Wait()
-				if err != nil {
-					log.Println("SELECT error:", err)
-					return err
-				}
-
-				if inbox.NumMessages <= 0 {
-					break
-				}
-
-				msg, err := fetchFirstMessage(client)
-				if err != nil {
-					return err
-				}
-				if msg == nil {
-					break
-				}
-
-				log.Printf(
-					"Importing message received by %s (uid %d, size %.1fK, folder %s)",
-					imap.Username, msg.uid, float32(len(msg.contents))/1024, folder)
-
-				if err := msg.importToGmail(mail, labels...); err != nil {
-					return err
-				}
-
-				if err := deleteMessage(client, msg.uid); err != nil {
-					return err
-				}
-			}
-		}
-
-		// Go back to sleep until the next mailbox update.
-		if err := doIdle(client, mailboxUpdate, maxPollTime); err != nil {
-			return err
-		}
-	}
+	return nil
 }
 
 // Retrieve inbox message sequence number 1.
-func fetchFirstMessage(client *imapclient.Client) (*message, error) {
+func (s *session) fetchFirstMessage() (uid imap.UID, data []byte, err error) {
 	var (
 		// Set an empty body section to request the raw contents of the entire
 		// message.
 		entireMessage = []*imap.FetchItemBodySection{{}}
-		fetch         = client.Fetch(
+		fetch         = s.client.Fetch(
 			imap.SeqSetNum(1), &imap.FetchOptions{BodySection: entireMessage, UID: true})
 	)
 	defer fetch.Close()
@@ -327,41 +360,40 @@ func fetchFirstMessage(client *imapclient.Client) (*message, error) {
 	messages, err := fetch.Collect()
 	if err != nil {
 		log.Println("FETCH error:", err)
-		return nil, err
+		return
 	}
 
 	if len(messages) <= 0 {
-		return nil, nil
+		return
 	}
 
-	var (
-		msg  = messages[0]
-		data []byte
-	)
+	data = make([]byte, 0)
+	msg := messages[0]
+	uid = msg.UID
 	for _, buffer := range msg.BodySection {
 		data = append(data, buffer.Bytes...)
 	}
-	return &message{
-		uid:      msg.UID,
-		contents: data}, nil
+	return
 }
 
-// An email fetched from an IMAP mailbox.
-type message struct {
-	uid      imap.UID
-	contents []byte
+// A Gmail target that can accept imported messages. This is an interface for
+// testing purposes.
+type gmailInbox interface {
+	DoImport(envelope []byte, labels ...string) error
 }
+
+type gmailInboxReal gmail.Service
 
 // Import this message to Gmail via media upload.
-func (m *message) importToGmail(mail *gmail.Service, labels ...string) error {
-	r, err := mail.Users.Messages.
+func (gm *gmailInboxReal) DoImport(envelope []byte, labels ...string) error {
+	r, err := gm.Users.Messages.
 		Import("me", &gmail.Message{LabelIds: append(labels, "UNREAD")}).
 		InternalDateSource("dateHeader").
 		NeverMarkSpam(false).
 		ProcessForCalendar(true).
 		Deleted(false).
 		Media(
-			bytes.NewReader(m.contents),
+			bytes.NewReader(envelope),
 			googleapi.ContentType("message/rfc822")).
 		Do()
 	if err != nil {
@@ -379,7 +411,7 @@ func (m *message) importToGmail(mail *gmail.Service, labels ...string) error {
 }
 
 // Expunge a message from the inbox by UID.
-func deleteMessage(client *imapclient.Client, uid imap.UID) error {
+func (s *session) deleteMessage(uid imap.UID) error {
 	var (
 		setNum     = imap.UIDSetNum(uid)
 		addDeleted = &imap.StoreFlags{
@@ -387,7 +419,7 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 			Silent: true,
 			Flags:  []imap.Flag{imap.FlagDeleted}}
 	)
-	if err := client.
+	if err := s.client.
 		Store(setNum, addDeleted, nil).
 		Close(); err != nil {
 
@@ -395,7 +427,7 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 		return err
 	}
 
-	if err := client.
+	if err := s.client.
 		Expunge().
 		Close(); err != nil {
 
@@ -408,20 +440,16 @@ func deleteMessage(client *imapclient.Client, uid imap.UID) error {
 
 // Block until the next mailbox status update, or until the deadline has
 // elapsed.
-func doIdle(
-	client *imapclient.Client,
-	mailboxUpdate chan *imapclient.UnilateralDataMailbox,
-	deadline time.Duration,
-) error {
-	idle, err := client.Idle()
+func (s *session) doIdle() error {
+	idle, err := s.client.Idle()
 	if err != nil {
 		log.Println("IDLE error:", err)
 		return err
 	}
 
-	timer := time.NewTimer(deadline)
+	timer := time.NewTimer(s.idleDeadline)
 	select {
-	case <-mailboxUpdate:
+	case <-s.mailboxUpdate:
 		timer.Stop()
 	case <-timer.C:
 	}
