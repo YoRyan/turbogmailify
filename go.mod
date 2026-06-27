@@ -4,7 +4,7 @@ go 1.25.8
 
 require (
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
-	github.com/pelletier/go-toml/v2 v2.4.0
+	github.com/pelletier/go-toml/v2 v2.4.2
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.285.0
 )
