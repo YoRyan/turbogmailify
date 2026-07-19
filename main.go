@@ -107,11 +107,12 @@ type config struct {
 }
 
 type configImap struct {
-	Address    string
-	Username   string
-	Password   string
-	Folders    map[string][]string
-	IdleFolder string // folder to IDLE on; defaults to "INBOX" if empty
+	Address        string
+	Username       string
+	Password       string
+	Folders        map[string][]string
+	ArchiveFolders map[string]string
+	IdleFolder     string // folder to IDLE on; defaults to "INBOX" if empty
 }
 
 func (c *config) getOAuthConfig() (oa *oauth2.Config) {
@@ -210,6 +211,7 @@ func doForwarding(ctx context.Context, c *config) {
 type forwardConfig struct {
 	Id                  string
 	FolderToLabels      map[string][]string
+	FolderToArchive     map[string]string
 	FolderOrderIdleLast []string
 }
 
@@ -221,6 +223,21 @@ func createForwardConfig(c *configImap) forwardConfig {
 		folders = map[string][]string{
 			"INBOX": {"INBOX"},
 			"Junk":  {"SPAM"},
+		}
+	}
+
+	archive := make(map[string]string, len(c.Folders))
+	var archiveFallback string
+	if folder, ok := c.ArchiveFolders["*"]; ok {
+		archiveFallback = folder
+	} else {
+		archiveFallback = ""
+	}
+	for src := range folders {
+		if dest, ok := c.ArchiveFolders[src]; ok {
+			archive[src] = dest
+		} else if archiveFallback != "" {
+			archive[src] = archiveFallback
 		}
 	}
 
@@ -254,6 +271,7 @@ func createForwardConfig(c *configImap) forwardConfig {
 	return forwardConfig{
 		Id:                  c.Username,
 		FolderToLabels:      folders,
+		FolderToArchive:     archive,
 		FolderOrderIdleLast: ordered,
 	}
 }
@@ -332,8 +350,14 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 				return err
 			}
 
-			if err := s.deleteMessage(uid); err != nil {
-				return err
+			if dest, ok := f.FolderToArchive[folder]; ok {
+				if err := s.moveMessage(uid, dest); err != nil {
+					return err
+				}
+			} else {
+				if err := s.deleteMessage(uid); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -404,6 +428,20 @@ func (gm *gmailInboxReal) DoImport(envelope []byte, labels ...string) error {
 	if r.HTTPStatusCode != 200 {
 		err := fmt.Errorf("gmail returned status code: %v", r.HTTPStatusCode)
 		log.Println(err)
+		return err
+	}
+
+	return nil
+}
+
+// Move a message into another mailbox using IMAP MOVE or, if that command is
+// not available, COPY/STORE/EXPUNGE.
+func (s *session) moveMessage(uid imap.UID, mailbox string) error {
+	if _, err := s.client.
+		Move(imap.UIDSetNum(uid), mailbox).
+		Wait(); err != nil {
+
+		log.Println("MOVE error:", err)
 		return err
 	}
 

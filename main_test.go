@@ -78,6 +78,13 @@ func TestConfigFromDefault(t *testing.T) {
 		}
 	}
 
+	{
+		got := len(fc.FolderToArchive)
+		if got != 0 {
+			t.Fatalf("len(FolderToArchive) = %d; want 0", got)
+		}
+	}
+
 	slicesEqual(t, []string{"INBOX"}, fc.FolderToLabels["INBOX"])
 	slicesEqual(t, []string{"SPAM"}, fc.FolderToLabels["Junk"])
 	slicesEqual(t, []string{"Junk", "INBOX"}, fc.FolderOrderIdleLast)
@@ -137,10 +144,158 @@ func TestConfigExplicitIdleFolder(t *testing.T) {
 	}
 }
 
+func TestConfigArchiveDefined(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX": []string{"INBOX"},
+			"Junk":  []string{"SPAM"},
+		},
+		ArchiveFolders: map[string]string{
+			"INBOX": "Archive",
+			"Junk":  "ArchiveJunk",
+		},
+	})
+
+	{
+		got := len(fc.FolderToArchive)
+		if got != 2 {
+			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["INBOX"]
+		if got != "Archive" {
+			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["Junk"]
+		if got != "ArchiveJunk" {
+			t.Fatalf("FolderToArchive[Junk] = %s; want ArchiveJunk", got)
+		}
+	}
+}
+
+func TestConfigArchiveDefinedWithDefaultFolders(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		ArchiveFolders: map[string]string{
+			"INBOX": "Archive",
+			"Junk":  "ArchiveJunk",
+		},
+	})
+
+	{
+		got := len(fc.FolderToArchive)
+		if got != 2 {
+			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["INBOX"]
+		if got != "Archive" {
+			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["Junk"]
+		if got != "ArchiveJunk" {
+			t.Fatalf("FolderToArchive[Junk] = %s; want ArchiveJunk", got)
+		}
+	}
+}
+
+func TestConfigArchivePartial(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX": []string{"INBOX"},
+			"Junk":  []string{"SPAM"},
+		},
+		ArchiveFolders: map[string]string{
+			"INBOX": "Archive",
+		},
+	})
+
+	{
+		got := len(fc.FolderToArchive)
+		if got != 1 {
+			t.Fatalf("len(FolderToArchive) = %d; want 1", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["INBOX"]
+		if got != "Archive" {
+			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
+		}
+	}
+}
+
+func TestConfigArchivePartialWithFallback(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX": []string{"INBOX"},
+			"Junk":  []string{"SPAM"},
+		},
+		ArchiveFolders: map[string]string{
+			"Junk": "ArchiveJunk",
+			"*":    "Archive",
+		},
+	})
+
+	{
+		got := len(fc.FolderToArchive)
+		if got != 2 {
+			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["INBOX"]
+		if got != "Archive" {
+			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["Junk"]
+		if got != "ArchiveJunk" {
+			t.Fatalf("FolderToArchive[Junk] = %s; want ArchiveJunk", got)
+		}
+	}
+}
+
+func TestConfigArchiveOnlyFallback(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX": []string{"INBOX"},
+			"Junk":  []string{"SPAM"},
+		},
+		ArchiveFolders: map[string]string{
+			"*": "Archive",
+		},
+	})
+
+	{
+		got := len(fc.FolderToArchive)
+		if got != 2 {
+			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["INBOX"]
+		if got != "Archive" {
+			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
+		}
+	}
+	{
+		got := fc.FolderToArchive["Junk"]
+		if got != "Archive" {
+			t.Fatalf("FolderToArchive[Junk] = %s; want Archive", got)
+		}
+	}
+}
+
 func TestDefaultForward(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
-	})
+	}, false)
 	config := &configImap{Address: addr}
 	inbox := &mockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
@@ -182,7 +337,7 @@ func TestDefaultForward(t *testing.T) {
 func TestForwardWithLabels(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
-	})
+	}, false)
 	config := &configImap{
 		Address: addr,
 		Folders: map[string][]string{
@@ -229,7 +384,7 @@ func TestForwardMultipleFolders(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX":        []uint32{2},
 		"CustomFolder": []uint32{1},
-	})
+	}, false)
 	config := &configImap{
 		Address: addr,
 		Folders: map[string][]string{
@@ -282,7 +437,7 @@ func TestForwardMultipleFolders(t *testing.T) {
 func TestForwardImapCommands(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
-	})
+	}, false)
 	config := &configImap{Address: addr}
 	inbox := &mockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
@@ -439,12 +594,104 @@ func TestForwardImapCommands(t *testing.T) {
 	}
 }
 
+func TestForwardArchiveUsesImapMove(t *testing.T) {
+	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
+		"INBOX": []uint32{1},
+	}, true)
+	config := &configImap{Address: addr, ArchiveFolders: map[string]string{
+		"INBOX": "Archive",
+	}}
+	inbox := &mockInbox{}
+	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+		t.Fatalf("Error executing forwardAndIdle: %v", err)
+	}
+
+	moves := make([]mocks.CommandMove, 0)
+	for _, cmd := range ts.Commands {
+		switch v := cmd.(type) {
+		case mocks.CommandMove:
+			moves = append(moves, v)
+		}
+	}
+
+	{
+		got := len(moves)
+		if got != 1 {
+			t.Fatalf("len(moves) = %d; want 1", got)
+		}
+	}
+
+	move := moves[0]
+	{
+		got := move.NumSet.String()
+		if got != "1" {
+			t.Fatalf("move.NumSet = %s; want 1", got)
+		}
+	}
+	{
+		got := move.Dest
+		if got != "Archive" {
+			t.Fatalf("move.Dest = %s; want Archive", got)
+		}
+	}
+
+	if err := ts.CloseServer(); err != nil {
+		t.Errorf("Error closing test server: %v", err)
+	}
+}
+
+func TestForwardArchiveUsesImapCopy(t *testing.T) {
+	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
+		"INBOX": []uint32{1},
+	}, false)
+	config := &configImap{Address: addr, ArchiveFolders: map[string]string{
+		"INBOX": "Archive",
+	}}
+	inbox := &mockInbox{}
+	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+		t.Fatalf("Error executing forwardAndIdle: %v", err)
+	}
+
+	copies := make([]mocks.CommandCopy, 0)
+	for _, cmd := range ts.Commands {
+		switch v := cmd.(type) {
+		case mocks.CommandCopy:
+			copies = append(copies, v)
+		}
+	}
+
+	{
+		got := len(copies)
+		if got != 1 {
+			t.Fatalf("len(copies) = %d; want 1", got)
+		}
+	}
+
+	copy := copies[0]
+	{
+		got := copy.NumSet.String()
+		if got != "1" {
+			t.Fatalf("copy.NumSet = %s; want 1", got)
+		}
+	}
+	{
+		got := copy.Dest
+		if got != "Archive" {
+			t.Fatalf("copy.Dest = %s; want Archive", got)
+		}
+	}
+
+	if err := ts.CloseServer(); err != nil {
+		t.Errorf("Error closing test server: %v", err)
+	}
+}
+
 func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX":        []uint32{1},
 		"Junk":         []uint32{2},
 		"CustomFolder": []uint32{3},
-	})
+	}, false)
 	config := &configImap{
 		Address:    addr,
 		IdleFolder: "INBOX",
@@ -485,7 +732,7 @@ func TestIdleFolderSelectIsLast(t *testing.T) {
 		"INBOX":        []uint32{1},
 		"Junk":         []uint32{2},
 		"CustomFolder": []uint32{3},
-	})
+	}, false)
 	config := &configImap{
 		Address:    addr,
 		IdleFolder: "INBOX",

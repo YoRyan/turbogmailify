@@ -68,6 +68,10 @@ Turbogmailify accepts a single configuration file in JSON format. (It's handy to
           "SPAM"
         ]
       },
+      "ArchiveFolders": {
+        "Junk": "JunkArchive",
+        "*": "Archive"
+      },
       "IdleFolder": "INBOX"
     }
   ],
@@ -90,6 +94,8 @@ Turbogmailify accepts a single configuration file in JSON format. (It's handy to
 The `Imap` section specifies one or more external IMAP servers to connect to.
 
 The `Folders` sub-section maps IMAP folders to Gmail labels. Please note that labels must be specified using their unique identifiers, not their human-readable names. For built-in "system" labels, these values are identical, but "user" labels have randomly generated identifiers. You can obtain these identifiers by running [this](https://gist.github.com/YoRyan/4f9d28531d2b2eb9014dcb2c627aa10b) Google App Script against [your account](https://script.google.com/home). Specifying a mapping is optional; if omitted, turbogmailify uses the INBOX and Junk mapping depicted in this sample.
+
+The optional `ArchiveFolders` sub-section maps IMAP folders to other IMAP folders. It instructs Turbogmailify to move the forwarded email to another folder on the source server rather than expunge it. The wildcard key `*` specifies an archive folder for all source folders that do not already have explicitly defined archive folders.
 
 The IMAP protocol allows a client to use the IDLE command to receive instantaneous notifications of incoming mail for a single folder. The `IdleFolder` sub-key specifies which folder Turbogmailify will watch. If omitted, the default is the INBOX folder. (Regardless of these notifications, Turbogmailify checks all configured folders at least as often as every 5 minutes.)
 

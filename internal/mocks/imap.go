@@ -13,6 +13,11 @@ type CommandSelect struct {
 	Options *imap.SelectOptions
 }
 
+type CommandAppend struct {
+	Mailbox string
+	Options *imap.AppendOptions
+}
+
 type CommandIdle struct{}
 
 type CommandExpunge struct{}
@@ -26,6 +31,16 @@ type CommandStore struct {
 	NumSet  imap.NumSet
 	Flags   *imap.StoreFlags
 	Options *imap.StoreOptions
+}
+
+type CommandCopy struct {
+	NumSet imap.NumSet
+	Dest   string
+}
+
+type CommandMove struct {
+	NumSet imap.NumSet
+	Dest   string
 }
 
 // A mock IMAP server. All retrieved messages have identical content but
@@ -94,7 +109,21 @@ func (s *TestServer) Status(mailbox string, options *imap.StatusOptions) (*imap.
 }
 
 func (s *TestServer) Append(mailbox string, r imap.LiteralReader, options *imap.AppendOptions) (*imap.AppendData, error) {
-	panic("not implemented")
+	s.Commands = append(s.Commands, CommandAppend{
+		Mailbox: mailbox,
+		Options: options,
+	})
+
+	// Create a new UID to represent the new message.
+	highest := s.highestUid()
+	if _, ok := s.Messages[mailbox]; !ok {
+		s.Messages[mailbox] = make([]uint32, 0)
+	}
+	s.Messages[mailbox] = append(s.Messages[mailbox], highest+1)
+
+	// For now, we don't do anything with the contents, and we don't need to
+	// return any AppendData.
+	return nil, nil
 }
 
 func (s *TestServer) Poll(w *imapserver.UpdateWriter, allowExpunge bool) error {
@@ -166,15 +195,8 @@ func (s *TestServer) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags 
 	}
 
 	toRemove := make(map[uint32]struct{})
-	switch v := numSet.(type) {
-	case imap.UIDSet:
-		nums, _ := v.Nums()
-		for _, n := range nums {
-			toRemove[uint32(n)] = struct{}{}
-		}
-	case imap.SeqSet:
-	default:
-		panic("not implemented")
+	for _, n := range uidSet(numSet) {
+		toRemove[n] = struct{}{}
 	}
 
 	if present, ok := s.Messages[s.mailbox]; ok {
@@ -191,21 +213,107 @@ func (s *TestServer) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags 
 }
 
 func (s *TestServer) Copy(numSet imap.NumSet, dest string) (*imap.CopyData, error) {
-	panic("not implemented")
+	s.Commands = append(s.Commands, CommandCopy{
+		NumSet: numSet,
+		Dest:   dest,
+	})
+
+	// Add new UID's to the destination mailbox to represent the copy.
+	highest := s.highestUid()
+	if _, ok := s.Messages[dest]; !ok {
+		s.Messages[dest] = make([]uint32, 0)
+	}
+	for i := range uidSet(numSet) {
+		uid := highest + 1 + uint32(i)
+		s.Messages[dest] = append(s.Messages[dest], uid)
+	}
+
+	// For now, no need for CopyData.
+	return nil, nil
 }
 
-func CreateTestServer(messages map[string]([]uint32)) (ts *TestServer, address string) {
+func (s *TestServer) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest string) error {
+	s.Commands = append(s.Commands, CommandMove{
+		NumSet: numSet,
+		Dest:   dest,
+	})
+
+	// This is very quick and dirty. We assume the test suite will never pass
+	// nonexistent UID's.
+	toMove := make(map[uint32]struct{}, 0)
+	for _, n := range uidSet(numSet) {
+		toMove[n] = struct{}{}
+	}
+
+	// Remove the UID"s to be removed from all mailboxes.
+	for mailbox, uids := range s.Messages {
+		newUids := make([]uint32, 0)
+		for _, n := range uids {
+			if _, move := toMove[n]; !move {
+				newUids = append(newUids, n)
+			}
+		}
+		s.Messages[mailbox] = newUids
+	}
+
+	// Add them to the destination mailbox.
+	if _, ok := s.Messages[dest]; !ok {
+		s.Messages[dest] = make([]uint32, 0)
+	}
+	for n := range toMove {
+		s.Messages[dest] = append(s.Messages[dest], n)
+	}
+
+	return nil
+}
+
+func (s *TestServer) highestUid() uint32 {
+	var highest uint32 = 0
+	for _, uids := range s.Messages {
+		for _, n := range uids {
+			if n > highest {
+				highest = n
+			}
+		}
+	}
+	return highest
+}
+
+func uidSet(numSet imap.NumSet) []uint32 {
+	switch v := numSet.(type) {
+	case imap.UIDSet:
+		nums, _ := v.Nums()
+		uints := make([]uint32, len(nums))
+		for i, n := range nums {
+			uints[i] = uint32(n)
+		}
+		return uints
+	case imap.SeqSet:
+	default:
+		panic("not implemented")
+	}
+	return nil // Not sure why the Go compiler needs this, but it does.
+}
+
+func CreateTestServer(messages map[string]([]uint32), supportMove bool) (ts *TestServer, address string) {
 	ts = &TestServer{
 		Messages: messages,
 		Commands: make([]any, 0),
 	}
 	address = "0.0.0.0:10143"
 
+	caps := imap.CapSet{}
+	caps[imap.CapIMAP4rev1] = struct{}{}
+	if supportMove {
+		caps[imap.CapMove] = struct{}{}
+	}
+
 	options := imapserver.Options{
 		NewSession: func(c *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
 			return ts, &imapserver.GreetingData{}, nil
 		},
 		InsecureAuth: true,
+		Caps:         caps,
 	}
 	server := imapserver.New(&options)
 	ts.imap = server
