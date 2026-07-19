@@ -199,7 +199,7 @@ func CreateTestServer(messages map[string]([]uint32)) (ts *TestServer, address s
 		Messages: messages,
 		Commands: make([]any, 0),
 	}
-	address = "[::1]:10143"
+	address = "0.0.0.0:10143"
 
 	options := imapserver.Options{
 		NewSession: func(c *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
