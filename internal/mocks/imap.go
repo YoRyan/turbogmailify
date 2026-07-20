@@ -13,11 +13,6 @@ type CommandSelect struct {
 	Options *imap.SelectOptions
 }
 
-type CommandAppend struct {
-	Mailbox string
-	Options *imap.AppendOptions
-}
-
 type CommandIdle struct{}
 
 type CommandExpunge struct{}
@@ -109,21 +104,7 @@ func (s *TestServer) Status(mailbox string, options *imap.StatusOptions) (*imap.
 }
 
 func (s *TestServer) Append(mailbox string, r imap.LiteralReader, options *imap.AppendOptions) (*imap.AppendData, error) {
-	s.Commands = append(s.Commands, CommandAppend{
-		Mailbox: mailbox,
-		Options: options,
-	})
-
-	// Create a new UID to represent the new message.
-	highest := s.highestUid()
-	if _, ok := s.Messages[mailbox]; !ok {
-		s.Messages[mailbox] = make([]uint32, 0)
-	}
-	s.Messages[mailbox] = append(s.Messages[mailbox], highest+1)
-
-	// For now, we don't do anything with the contents, and we don't need to
-	// return any AppendData.
-	return nil, nil
+	panic("not implemented")
 }
 
 func (s *TestServer) Poll(w *imapserver.UpdateWriter, allowExpunge bool) error {
