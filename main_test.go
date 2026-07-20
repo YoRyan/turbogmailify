@@ -296,6 +296,8 @@ func TestDefaultForward(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
 	}, false)
+	defer ts.CloseServer()
+
 	config := &configImap{Address: addr}
 	inbox := &mockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
@@ -328,16 +330,14 @@ func TestDefaultForward(t *testing.T) {
 			t.Fatalf("msg.labels[0] = %s; want INBOX", got)
 		}
 	}
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
-	}
 }
 
 func TestForwardWithLabels(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
 	}, false)
+	defer ts.CloseServer()
+
 	config := &configImap{
 		Address: addr,
 		Folders: map[string][]string{
@@ -374,10 +374,6 @@ func TestForwardWithLabels(t *testing.T) {
 			}
 		}
 	}
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
-	}
 }
 
 func TestForwardMultipleFolders(t *testing.T) {
@@ -385,6 +381,8 @@ func TestForwardMultipleFolders(t *testing.T) {
 		"INBOX":        []uint32{2},
 		"CustomFolder": []uint32{1},
 	}, false)
+	defer ts.CloseServer()
+
 	config := &configImap{
 		Address: addr,
 		Folders: map[string][]string{
@@ -428,16 +426,14 @@ func TestForwardMultipleFolders(t *testing.T) {
 			}
 		}
 	}
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
-	}
 }
 
 func TestForwardImapCommands(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
 	}, false)
+	defer ts.CloseServer()
+
 	config := &configImap{Address: addr}
 	inbox := &mockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
@@ -588,16 +584,14 @@ func TestForwardImapCommands(t *testing.T) {
 			t.Fatalf("IMAP STORE does not set the /Deleted flag")
 		}
 	}
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
-	}
 }
 
 func TestForwardArchiveUsesImapMove(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
 	}, true)
+	defer ts.CloseServer()
+
 	config := &configImap{Address: addr, ArchiveFolders: map[string]string{
 		"INBOX": "Archive",
 	}}
@@ -634,16 +628,14 @@ func TestForwardArchiveUsesImapMove(t *testing.T) {
 			t.Fatalf("move.Dest = %s; want Archive", got)
 		}
 	}
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
-	}
 }
 
 func TestForwardArchiveUsesImapCopy(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
 	}, false)
+	defer ts.CloseServer()
+
 	config := &configImap{Address: addr, ArchiveFolders: map[string]string{
 		"INBOX": "Archive",
 	}}
@@ -680,10 +672,6 @@ func TestForwardArchiveUsesImapCopy(t *testing.T) {
 			t.Fatalf("copy.Dest = %s; want Archive", got)
 		}
 	}
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
-	}
 }
 
 func TestFolderSelectOrderMatchesConfig(t *testing.T) {
@@ -692,6 +680,8 @@ func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 		"Junk":         []uint32{2},
 		"CustomFolder": []uint32{3},
 	}, false)
+	defer ts.CloseServer()
+
 	config := &configImap{
 		Address:    addr,
 		IdleFolder: "INBOX",
@@ -721,10 +711,6 @@ func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 		}
 	}
 	slicesEqual(t, fc.FolderOrderIdleLast, distinct)
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
-	}
 }
 
 func TestIdleFolderSelectIsLast(t *testing.T) {
@@ -733,6 +719,8 @@ func TestIdleFolderSelectIsLast(t *testing.T) {
 		"Junk":         []uint32{2},
 		"CustomFolder": []uint32{3},
 	}, false)
+	defer ts.CloseServer()
+
 	config := &configImap{
 		Address:    addr,
 		IdleFolder: "INBOX",
@@ -753,9 +741,5 @@ func TestIdleFolderSelectIsLast(t *testing.T) {
 	got := mailboxes[len(mailboxes)-1]
 	if got != config.IdleFolder {
 		t.Fatalf("last mailbox = %s; want %s", got, config.IdleFolder)
-	}
-
-	if err := ts.CloseServer(); err != nil {
-		t.Errorf("Error closing test server: %v", err)
 	}
 }
