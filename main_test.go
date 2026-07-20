@@ -867,8 +867,14 @@ func TestForwardMovesFailedMessage(t *testing.T) {
 	}
 	{
 		got := len(inbox.Messages)
-		if got != 1 {
-			t.Fatalf("len(inbox.Messages) = %d; want 1", got)
+		if got != 2 {
+			t.Fatalf("len(inbox.Messages) = %d; want 2", got)
+		}
+	}
+	{
+		msg := inbox.Messages[1]
+		if !strings.Contains(string(msg.Envelope), "Message Import Failure") {
+			t.Fatalf("inbox.Messages[1] does not look like a failure notification from turbogmailify")
 		}
 	}
 }
@@ -922,8 +928,14 @@ func TestForwardSkipsFailedMessage(t *testing.T) {
 	}
 	{
 		got := len(inbox.Messages)
-		if got != 1 {
-			t.Fatalf("len(inbox.Messages) = %d; want 1", got)
+		if got != 2 {
+			t.Fatalf("len(inbox.Messages) = %d; want 2", got)
+		}
+	}
+	{
+		msg := inbox.Messages[1]
+		if !strings.Contains(string(msg.Envelope), "Message Import Failure") {
+			t.Fatalf("inbox.Messages[1] does not look like a failure notification from turbogmailify")
 		}
 	}
 }

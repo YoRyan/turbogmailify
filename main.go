@@ -351,6 +351,7 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 			successUids = make([]imap.UID, 0)
 			failUids    = make([]imap.UID, 0)
 		)
+		failFolder, failFolderOk := f.FolderToFailed[folder]
 		for i := range inbox.NumMessages {
 			uid, envelope, err := s.fetchMessage(i + 1)
 			if err != nil {
@@ -362,9 +363,10 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 				continue
 			}
 
+			sizeKB := float32(len(envelope)) / 1024
 			log.Printf(
 				"Importing message received by %s (uid %d, size %.1fK, folder %s)",
-				f.Id, uid, float32(len(envelope))/1024, folder)
+				f.Id, uid, sizeKB, folder)
 
 			if err := gm.DoImport(envelope, labels...); err != nil {
 				log.Printf("Error importing message: %v", err)
@@ -372,6 +374,14 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 					// Leave it alone; try again next cycle.
 				} else {
 					failUids = append(failUids, uid)
+
+					var disposition string
+					if failFolderOk {
+						disposition = fmt.Sprintf("The message has been moved to %s, the configured IMAP folder for failed messages.", failFolder)
+					} else {
+						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be done with the FailedFolders option."
+					}
+					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", f.Id, folder), fmt.Sprintf("Account: %s\nFolder: %s\nUID: %d\nSize: %1.fK\n\n%s", f.Id, folder, uid, sizeKB, disposition))
 				}
 			} else {
 				successUids = append(successUids, uid)
@@ -394,10 +404,10 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 			}
 		}
 
-		if dest, ok := f.FolderToFailed[folder]; ok {
+		if failFolderOk {
 			// Move to the configured failed folder.
 			for _, uid := range failUids {
-				if err := s.moveMessage(uid, dest); err != nil {
+				if err := s.moveMessage(uid, failFolder); err != nil {
 					return err
 				}
 			}
@@ -495,6 +505,16 @@ func isImportRetryable(err error) bool {
 	}
 
 	return true
+}
+
+func sendNotification(gm gmailInbox, subject, body string) error {
+	envelope := fmt.Sprintf(`From: Turbogmailify <me>
+Subject: %s
+Content-Type: text/plain
+
+%s
+`, subject, body)
+	return gm.DoImport([]byte(envelope), "INBOX")
 }
 
 // Move a message into another mailbox using IMAP MOVE or, if that command is
