@@ -10,23 +10,6 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 )
 
-type message struct {
-	envelope []byte
-	labels   []string
-}
-
-type mockInbox struct {
-	messages []message
-}
-
-func (m *mockInbox) DoImport(envelope []byte, labels ...string) error {
-	m.messages = append(m.messages, message{
-		envelope: envelope,
-		labels:   labels,
-	})
-	return nil
-}
-
 func createTestSession(c *configImap) *session {
 	// Make a handler and channel to receive mailbox status updates.
 	var (
@@ -48,8 +31,14 @@ func createTestSession(c *configImap) *session {
 		Login(c.Username, c.Password).
 		Wait()
 
+	// Pre-populate the importFailedUids map so it always works as expected.
+	importFailed := make(map[string]map[imap.UID]struct{}, len(c.Folders))
+	for folder := range c.Folders {
+		importFailed[folder] = make(map[imap.UID]struct{}, 0)
+	}
+
 	return &session{
-		client, mailboxUpdate, time.Duration(0),
+		client, mailboxUpdate, time.Duration(0), importFailed,
 	}
 }
 
@@ -292,6 +281,95 @@ func TestConfigArchiveOnlyFallback(t *testing.T) {
 	}
 }
 
+func TestConfigFailedDefined(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX": []string{"INBOX"},
+			"Junk":  []string{"SPAM"},
+		},
+		FailedFolders: map[string]string{
+			"INBOX": "Failed",
+			"Junk":  "FailedJunk",
+		},
+	})
+
+	{
+		got := len(fc.FolderToFailed)
+		if got != 2 {
+			t.Fatalf("len(FolderToFailed) = %d; want 2", got)
+		}
+	}
+	{
+		got := fc.FolderToFailed["INBOX"]
+		if got != "Failed" {
+			t.Fatalf("FolderToFailed[INBOX] = %s; want Failed", got)
+		}
+	}
+	{
+		got := fc.FolderToFailed["Junk"]
+		if got != "FailedJunk" {
+			t.Fatalf("FolderToFailed[Junk] = %s; want FailedJunk", got)
+		}
+	}
+}
+
+func TestConfigFailedPartial(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX": []string{"INBOX"},
+			"Junk":  []string{"SPAM"},
+		},
+		FailedFolders: map[string]string{
+			"INBOX": "Failed",
+		},
+	})
+
+	{
+		got := len(fc.FolderToFailed)
+		if got != 1 {
+			t.Fatalf("len(FolderToFailed) = %d; want 1", got)
+		}
+	}
+	{
+		got := fc.FolderToFailed["INBOX"]
+		if got != "Failed" {
+			t.Fatalf("FolderToFailed[INBOX] = %s; want Failed", got)
+		}
+	}
+}
+
+func TestConfigFailedPartialWithFallback(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX": []string{"INBOX"},
+			"Junk":  []string{"SPAM"},
+		},
+		FailedFolders: map[string]string{
+			"Junk": "FailedJunk",
+			"*":    "Failed",
+		},
+	})
+
+	{
+		got := len(fc.FolderToFailed)
+		if got != 2 {
+			t.Fatalf("len(FolderToFailed) = %d; want 2", got)
+		}
+	}
+	{
+		got := fc.FolderToFailed["INBOX"]
+		if got != "Failed" {
+			t.Fatalf("FolderToFailed[INBOX] = %s; want Failed", got)
+		}
+	}
+	{
+		got := fc.FolderToFailed["Junk"]
+		if got != "FailedJunk" {
+			t.Fatalf("FolderToFailed[Junk] = %s; want FailedJunk", got)
+		}
+	}
+}
+
 func TestDefaultForward(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
@@ -299,33 +377,33 @@ func TestDefaultForward(t *testing.T) {
 	defer ts.CloseServer()
 
 	config := &configImap{Address: addr}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
 	{
-		got := len(inbox.messages)
+		got := len(inbox.Messages)
 		if got != 1 {
 			t.Fatalf("len(inbox.messages) = %d; want 1", got)
 		}
 	}
 
-	msg := inbox.messages[0]
+	msg := inbox.Messages[0]
 	{
-		got := string(msg.envelope)
+		got := string(msg.Envelope)
 		if !strings.Contains(got, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.") {
 			t.Fatalf("msg.envelope did not contain expected substring; got %s", got)
 		}
 	}
 	{
-		got := len(msg.labels)
+		got := len(msg.Labels)
 		if got != 1 {
 			t.Fatalf("len(msg.labels) = %d; want 1", got)
 		}
 	}
 	{
-		got := msg.labels[0]
+		got := msg.Labels[0]
 		if got != "INBOX" {
 			t.Fatalf("msg.labels[0] = %s; want INBOX", got)
 		}
@@ -344,28 +422,28 @@ func TestForwardWithLabels(t *testing.T) {
 			"INBOX": {"Label1", "Label2"},
 		},
 	}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
 	{
-		got := len(inbox.messages)
+		got := len(inbox.Messages)
 		if got != 1 {
 			t.Fatalf("len(inbox.messages) = %d; want 1", got)
 		}
 	}
 
-	msg := inbox.messages[0]
+	msg := inbox.Messages[0]
 	{
-		got := len(msg.labels)
+		got := len(msg.Labels)
 		if got != 2 {
 			t.Fatalf("len(msg.labels) = %d; want 2", got)
 		}
 	}
 	{
 		got := make(map[string](struct{}))
-		for _, label := range msg.labels {
+		for _, label := range msg.Labels {
 			got[label] = struct{}{}
 		}
 		for _, want := range []string{"Label1", "Label2"} {
@@ -390,13 +468,13 @@ func TestForwardMultipleFolders(t *testing.T) {
 			"CustomFolder": {"CustomLabel"},
 		},
 	}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
 	{
-		got := len(inbox.messages)
+		got := len(inbox.Messages)
 		if got != 2 {
 			t.Fatalf("len(inbox.messages) = %d; want 2", got)
 		}
@@ -404,13 +482,13 @@ func TestForwardMultipleFolders(t *testing.T) {
 
 	{
 		labels := make(map[string](struct{}))
-		for _, msg := range inbox.messages {
-			got := len(msg.labels)
+		for _, msg := range inbox.Messages {
+			got := len(msg.Labels)
 			if got != 1 {
 				t.Fatalf("len(msg.messages) = %d; want 1", got)
 			}
 
-			labels[msg.labels[0]] = struct{}{}
+			labels[msg.Labels[0]] = struct{}{}
 		}
 
 		{
@@ -435,7 +513,7 @@ func TestForwardImapCommands(t *testing.T) {
 	defer ts.CloseServer()
 
 	config := &configImap{Address: addr}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
@@ -595,7 +673,7 @@ func TestForwardArchiveUsesImapMove(t *testing.T) {
 	config := &configImap{Address: addr, ArchiveFolders: map[string]string{
 		"INBOX": "Archive",
 	}}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
@@ -639,7 +717,7 @@ func TestForwardArchiveUsesImapCopy(t *testing.T) {
 	config := &configImap{Address: addr, ArchiveFolders: map[string]string{
 		"INBOX": "Archive",
 	}}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
@@ -674,6 +752,182 @@ func TestForwardArchiveUsesImapCopy(t *testing.T) {
 	}
 }
 
+func TestForwardRetriesMessage(t *testing.T) {
+	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
+		"INBOX": []uint32{1},
+	}, false)
+	defer ts.CloseServer()
+
+	config := &configImap{Address: addr, Folders: map[string]([]string){
+		"INBOX": []string{"INBOX"},
+	}}
+	session := createTestSession(config)
+	forwardCfg := createForwardConfig(config)
+	inbox := &mocks.ErrorInbox{
+		Returns: mocks.ErrRetryable,
+	}
+
+	// This should import the message both times.
+	for range 2 {
+		if err := session.forwardAndIdle(forwardCfg, inbox); err != nil {
+			t.Fatalf("Error executing forwardAndIdle: %v", err)
+		}
+	}
+
+	var (
+		selects = make([]mocks.CommandSelect, 0)
+		fetches = make([]mocks.CommandFetch, 0)
+	)
+	for _, cmd := range ts.Commands {
+		switch v := cmd.(type) {
+		case mocks.CommandSelect:
+			selects = append(selects, v)
+		case mocks.CommandFetch:
+			fetches = append(fetches, v)
+		}
+	}
+
+	{
+		got := len(selects)
+		if got != 2 {
+			t.Fatalf("len(selects) = %d; want 2", got)
+		}
+	}
+	{
+		got := len(fetches)
+		if got != 2 {
+			t.Fatalf("len(fetches) = %d; want 2", got)
+		}
+	}
+	{
+		got := len(inbox.Messages)
+		if got != 2 {
+			t.Fatalf("len(inbox.Messages) = %d; want 2", got)
+		}
+	}
+}
+
+func TestForwardMovesFailedMessage(t *testing.T) {
+	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
+		"INBOX": []uint32{1},
+	}, true)
+	defer ts.CloseServer()
+
+	config := &configImap{Address: addr, Folders: map[string]([]string){
+		"INBOX": []string{"INBOX"},
+	}, FailedFolders: map[string]string{
+		"INBOX": "Failed",
+	}}
+	session := createTestSession(config)
+	forwardCfg := createForwardConfig(config)
+	inbox := &mocks.ErrorInbox{
+		Returns: mocks.ErrNonRetryable,
+	}
+
+	// This should import the message only once.
+	for range 2 {
+		if err := session.forwardAndIdle(forwardCfg, inbox); err != nil {
+			t.Fatalf("Error executing forwardAndIdle: %v", err)
+		}
+	}
+
+	var (
+		selects = make([]mocks.CommandSelect, 0)
+		fetches = make([]mocks.CommandFetch, 0)
+		moves   = make([]mocks.CommandMove, 0)
+	)
+	for _, cmd := range ts.Commands {
+		switch v := cmd.(type) {
+		case mocks.CommandSelect:
+			selects = append(selects, v)
+		case mocks.CommandFetch:
+			fetches = append(fetches, v)
+		case mocks.CommandMove:
+			moves = append(moves, v)
+		}
+	}
+
+	{
+		got := len(selects)
+		if got != 2 {
+			t.Fatalf("len(selects) = %d; want 2", got)
+		}
+	}
+	{
+		got := len(fetches)
+		if got != 1 {
+			t.Fatalf("len(fetches) = %d; want 1", got)
+		}
+	}
+	{
+		got := len(moves)
+		if got != 1 {
+			t.Fatalf("len(moves) = %d; want 1", got)
+		}
+	}
+	{
+		got := len(inbox.Messages)
+		if got != 1 {
+			t.Fatalf("len(inbox.Messages) = %d; want 1", got)
+		}
+	}
+}
+
+func TestForwardSkipsFailedMessage(t *testing.T) {
+	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
+		"INBOX": []uint32{1},
+	}, true)
+	defer ts.CloseServer()
+
+	config := &configImap{Address: addr, Folders: map[string]([]string){
+		"INBOX": []string{"INBOX"},
+	}}
+	session := createTestSession(config)
+	forwardCfg := createForwardConfig(config)
+	inbox := &mocks.ErrorInbox{
+		Returns: mocks.ErrNonRetryable,
+	}
+
+	// This should import the message only once.
+	for range 2 {
+		if err := session.forwardAndIdle(forwardCfg, inbox); err != nil {
+			t.Fatalf("Error executing forwardAndIdle: %v", err)
+		}
+	}
+
+	var (
+		selects = make([]mocks.CommandSelect, 0)
+		fetches = make([]mocks.CommandFetch, 0)
+	)
+	for _, cmd := range ts.Commands {
+		switch v := cmd.(type) {
+		case mocks.CommandSelect:
+			selects = append(selects, v)
+		case mocks.CommandFetch:
+			fetches = append(fetches, v)
+		}
+	}
+
+	{
+		got := len(selects)
+		if got != 2 {
+			t.Fatalf("len(selects) = %d; want 2", got)
+		}
+	}
+	{
+		got := len(fetches)
+		if got != 2 {
+			t.Fatalf("len(fetches) = %d; want 2", got)
+		}
+	}
+	{
+		got := len(inbox.Messages)
+		if got != 1 {
+			t.Fatalf("len(inbox.Messages) = %d; want 1", got)
+		}
+	}
+}
+
 func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX":        []uint32{1},
@@ -686,7 +940,7 @@ func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 		Address:    addr,
 		IdleFolder: "INBOX",
 	}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	fc := createForwardConfig(config)
 	if err := createTestSession(config).forwardAndIdle(fc, inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
@@ -725,7 +979,7 @@ func TestIdleFolderSelectIsLast(t *testing.T) {
 		Address:    addr,
 		IdleFolder: "INBOX",
 	}
-	inbox := &mockInbox{}
+	inbox := &mocks.MockInbox{}
 	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}

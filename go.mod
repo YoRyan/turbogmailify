@@ -1,6 +1,6 @@
 module github.com/YoRyan/turbogmailify
 
-go 1.25.8
+go 1.26
 
 require (
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8

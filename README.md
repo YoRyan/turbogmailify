@@ -72,6 +72,9 @@ Turbogmailify accepts a single configuration file in JSON format. (It's handy to
         "Junk": "JunkArchive",
         "*": "Archive"
       },
+      "FailedFolders": {
+        "*": "Failed"
+      },
       "IdleFolder": "INBOX"
     }
   ],
@@ -96,6 +99,8 @@ The `Imap` section specifies one or more external IMAP servers to connect to.
 The `Folders` sub-section maps IMAP folders to Gmail labels. Please note that labels must be specified using their unique identifiers, not their human-readable names. For built-in "system" labels, these values are identical, but "user" labels have randomly generated identifiers. You can obtain these identifiers by running [this](https://gist.github.com/YoRyan/4f9d28531d2b2eb9014dcb2c627aa10b) Google App Script against [your account](https://script.google.com/home). Specifying a mapping is optional; if omitted, turbogmailify uses the INBOX and Junk mapping depicted in this sample.
 
 The optional `ArchiveFolders` sub-section maps IMAP folders to other IMAP folders. It instructs Turbogmailify to move the forwarded email to another folder on the source server rather than expunge it. The wildcard key `*` specifies an archive folder for all source folders that do not already have explicitly defined archive folders.
+
+The optional (but recommended) `FailedFolders` sub-section also maps IMAP folders to other IMAP folders. The Gmail API does not allow every valid email to be uploaded; it prohibits a few corner cases, such as emails [containing](https://support.google.com/mail/answer/6590) .exe attachments. This key instructs Turbogmailify to move the emails that Gmail rejects to the mapped folder. This way, it won't attempt to upload the bad messages again, and the messages are available for easy inspection. Just like `ArchiveFolders`, this sub-section supports the wildcard key `*`. (If this sub-section is not present, Turbogmailify will use an in-memory store to remember which emails shouldn't be retried. However, in the event of a program restart it will have lost this information and will attempt to upload the emails again, wasting bandwidth and API calls.)
 
 The IMAP protocol allows a client to use the IDLE command to receive instantaneous notifications of incoming mail for a single folder. The `IdleFolder` sub-key specifies which folder Turbogmailify will watch. If omitted, the default is the INBOX folder. (Regardless of these notifications, Turbogmailify checks all configured folders at least as often as every 5 minutes.)
 
