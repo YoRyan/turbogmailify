@@ -381,7 +381,7 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 					} else {
 						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be done with the FailedFolders option."
 					}
-					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", f.Id, folder), fmt.Sprintf("Account: %s\nFolder: %s\nUID: %d\nSize: %1.fK\n\n%s", f.Id, folder, uid, sizeKB, disposition))
+					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", f.Id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nUID: %d\nSize: %1.fK\n\n%s", err, f.Id, folder, uid, sizeKB, disposition))
 				}
 			} else {
 				successUids = append(successUids, uid)
