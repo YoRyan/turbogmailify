@@ -1,8 +1,8 @@
-# turbogmailify
+# Turbogmailify
 
 Turbogmailify is a self-hosted replacement for Gmail's built-in POP3 importer, which was sunset in January 2026. It collects emails from IMAP servers and imports them using Google's official [Gmail API](https://developers.google.com/workspace/gmail/api/guides). In addition to still being available, Turbogmailify is also much faster and more flexible compared to Google's former POP importer.
 
-### Features and limitations
+### Features and Limitations
 
 ✅ Speed: Turbogmailify polls your IMAP inbox every few minutes, as opposed to Google's POP importer, which was notorious for taking up to an hour between refreshes. On many IMAP servers, Turbogmailify can take advantage of the IDLE command to achieve instantaneous detection of new emails.
 
@@ -38,7 +38,7 @@ Turbogmailify is engineered specifically for Gmail and supports Gmail's OAuth fl
 
 ## Usage
 
-### Google Cloud setup
+### Google Cloud Setup
 
 The setup process is very similar to that of [gogcli](https://github.com/steipete/gogcli?tab=readme-ov-file#quick-start), the Google CLI that has become so fashionable among OpenClaw users.
 
@@ -49,13 +49,13 @@ The setup process is very similar to that of [gogcli](https://github.com/steipet
 5. [Create](https://console.cloud.google.com/auth/clients) a new client for your project. Choose the "Desktop" type.
 6. Download the JSON secrets file that Google provides for your client.
 
-### Write the configuration file
+### Write the Configuration File
 
 Turbogmailify accepts a single configuration file in TOML or JSON format. TOML is recommended for new users, but to preserve backwards compatibility with the first versions of the program, JSON remains the default format. You can opt into the TOML format by passing the `-toml` argument.
 
 It's handy to keep a TOML-to-JSON [converter](https://transform.tools/toml-to-json) or JSON [validator](https://jsonlint.com/) nearby when authoring your configuration file.
 
-#### Imap section
+#### Imap Section
 
 The `Imap` key specifies a TOML or JSON array of IMAP accounts to connect to and retrieve messages from.
 
@@ -215,9 +215,9 @@ IdleFolder = "INBOX"
 }
 ```
 
-#### Secrets section
+#### Secrets Section
 
-The Secrets key must contain all the JSON data from the `credentials.json` file that Google provides you in step #5 of [Google Cloud setup](#google-cloud-setup).
+The Secrets key must contain all the JSON data from the `credentials.json` file that Google provides you in step #5 of [#Google Cloud Setup](#google-cloud-setup).
 
 For a TOML configuration file, paste the entire contents of the credentials file as a string:
 
@@ -247,7 +247,7 @@ For a JSON configuration file, incorporate the JSON contents of the credentials 
 }
 ```
 
-#### Tokens section
+#### Tokens Section
 
 The Tokens key must contain the access and refresh tokens used to authenticate with Google. You obtain these tokens by running Turbogmailify with the `-auth` flag.
 
@@ -287,7 +287,7 @@ For a JSON configuration file, incorporate the JSON contents as data within the 
 }
 ```
 
-### Regular operations
+### Regular Operations
 
 With your configuration file fully populated, you can run Turbogmailify without the `-auth` flag, and the program will run indefinitely and start forwarding mail. (If using a TOML configuration file, you must still pass the `-toml` flag.)
 
