@@ -9,12 +9,12 @@ updates:
  - package-ecosystem: "gomod"
    directory: "/"
    schedule:
-     interval: weekly
+     interval: quarterly
  - package-ecosystem: "devcontainers"
    directory: "/"
    schedule:
-     interval: weekly
+     interval: quarterly
  - package-ecosystem: "github-actions"
    directory: "/"
    schedule:
-     interval: weekly
+     interval: quarterly
