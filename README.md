@@ -38,6 +38,12 @@ Turbogmailify is engineered specifically for Gmail and supports Gmail's OAuth fl
 
 ## Usage
 
+### How to Obtain
+
+Official container images are available from Docker Hub (`docker.io/YoRyan/turbogmailify`) and GitHub (`ghcr.io/YoRyan/turbogmailify`). Breaking changes will always result in a major version bump and a new Git branch and registry tag to track updates for that version. The `latest` tag always points to the newest code and makes no guarantees about backwards compatibility. As there is currently only one major version, there is only one other tag: `1`, which contains the exact same code as `latest`.
+
+To build the program yourself, install Go, and then run `go build` in the source repository.
+
 ### Google Cloud Setup
 
 The setup process is very similar to that of [gogcli](https://github.com/steipete/gogcli?tab=readme-ov-file#quick-start), the Google CLI that has become so fashionable among OpenClaw users.
