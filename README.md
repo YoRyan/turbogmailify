@@ -267,7 +267,7 @@ $ ./turbogmailify myconfig.file -auth -toml
 (or)
 
 ```
-$ docker run -it --rm -v ./myconfig.file:/turbogmailify.conf ghcr.io/yoryan/turbogmailify /turbogmailify.conf -auth -toml
+$ docker run -it --rm -v ./myconfig.file:/turbogmailify.conf ghcr.io/yoryan/turbogmailify:1 /turbogmailify.conf -auth -toml
 ```
 
 After completing this flow, you'll receive the tokens in the form of JSON data.
@@ -318,7 +318,7 @@ A suggested Docker Compose service is as follows:
 ```yaml
 services:
   turbogmailify:
-    image: ghcr.io/yoryan/turbogmailify
+    image: ghcr.io/yoryan/turbogmailify:1
     container_name: turbogmailify
     restart: unless-stopped
     configs:
