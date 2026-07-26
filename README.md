@@ -10,9 +10,9 @@ Turbogmailify is a self-hosted replacement for Gmail's built-in POP3 importer, w
 
 ✅ Reliability: The final import step, expunging the original message from the IMAP inbox, is executed by Turbogmailify if and only if the message has been successfully imported into Gmail. Turbogmailify checks the Junk folder, too, so you won't lose any important messages that have been marked false positives.
 
-⚒️ Classification: Gmail's label classification seems to work only sporadically on imported emails, and custom Gmail filters won't run at all. Consider using your IMAP inbox's filters, if available, as an alternative.
+⚒️ Classification: Gmail's filters seem to work inconsistently on imported emails (e.g., "from" filters do not seem to trigger, but "to" filters do). Consider using your IMAP inbox's filters, if available, as a reliable alternative.
 
-⚒️ Spam Filtering: Gmail's spam filter doesn't run on imported emails. But by applying the Spam label to emails that have been placed in the IMAP Junk folder, Turbogmailify can piggyback on the spam filter equipped by your IMAP inbox.
+⚒️ Spam Filtering: Gmail's spam filter may treat imported mails differently, so check your spam folder. Turbogmailify will apply the Spam label to emails imported from your IMAP Junk folder, and thus can reliably piggyback on the spam filter equipped by your IMAP inbox.
 
 ### FAQ
 
