@@ -363,7 +363,7 @@ With your configuration file fully populated, you can run Turbogmailify without 
 
 A suggested systemd service is as follows:
 
-```toml
+```
 [Unit]
 Description=Turbogmailify IMAP to Gmail
 
