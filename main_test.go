@@ -370,6 +370,102 @@ func TestConfigFailedPartialWithFallback(t *testing.T) {
 	}
 }
 
+func TestConfigNeverMarkSpam(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX":        []string{"INBOX"},
+			"CustomFolder": []string{"INBOX"},
+			"Junk":         []string{"SPAM"},
+		},
+		NeverMarkSpam: map[string]bool{
+			"INBOX":        true,
+			"CustomFolder": false,
+		},
+	})
+
+	{
+		got := len(fc.FolderToNeverMarkSpam)
+		if got != 3 {
+			t.Fatalf("len(FolderToNeverMarkSpam) = %d; want 3", got)
+		}
+	}
+	{
+		got := fc.FolderToNeverMarkSpam["INBOX"]
+		if !got {
+			t.Fatalf("FolderToNeverMarkSpam[INBOX] = %v; want true", got)
+		}
+	}
+	{
+		got := fc.FolderToNeverMarkSpam["CustomFolder"]
+		if got {
+			t.Fatalf("FolderToNeverMarkSpam[CustomFolder] = %v; want false", got)
+		}
+	}
+	{
+		got := fc.FolderToNeverMarkSpam["Junk"]
+		if got {
+			t.Fatalf("FolderToNeverMarkSpam[Junk] = %v; want false", got)
+		}
+	}
+}
+
+func TestConfigNeverMarkSpamDefault(t *testing.T) {
+	fc := createForwardConfig(&configImap{})
+
+	got := fc.FolderToNeverMarkSpam["Junk"]
+	if !got {
+		t.Fatalf("FolderToNeverMarkSpam[Junk] = %v; want true", got)
+	}
+}
+
+func TestConfigProcessForCalendar(t *testing.T) {
+	fc := createForwardConfig(&configImap{
+		Folders: map[string]([]string){
+			"INBOX":        []string{"INBOX"},
+			"CustomFolder": []string{"INBOX"},
+			"Junk":         []string{"SPAM"},
+		},
+		ProcessForCalendar: map[string]bool{
+			"CustomFolder": true,
+			"Junk":         false,
+		},
+	})
+
+	{
+		got := len(fc.FolderToProcessForCalendar)
+		if got != 3 {
+			t.Fatalf("len(FolderToProcessForCalendar) = %d; want 3", got)
+		}
+	}
+	{
+		got := fc.FolderToProcessForCalendar["INBOX"]
+		if !got {
+			t.Fatalf("FolderToProcessForCalendar[INBOX] = %v; want true", got)
+		}
+	}
+	{
+		got := fc.FolderToProcessForCalendar["CustomFolder"]
+		if !got {
+			t.Fatalf("FolderToProcessForCalendar[CustomFolder] = %v; want true", got)
+		}
+	}
+	{
+		got := fc.FolderToProcessForCalendar["Junk"]
+		if got {
+			t.Fatalf("FolderToProcessForCalendar[Junk] = %v; want false", got)
+		}
+	}
+}
+
+func TestConfigProcessForCalendarDefault(t *testing.T) {
+	fc := createForwardConfig(&configImap{})
+
+	got := fc.FolderToProcessForCalendar["Junk"]
+	if got {
+		t.Fatalf("FolderToProcessForCalendar[Junk] = %v; want false", got)
+	}
+}
+
 func TestDefaultForward(t *testing.T) {
 	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
 		"INBOX": []uint32{1},
@@ -502,6 +598,76 @@ func TestForwardMultipleFolders(t *testing.T) {
 					t.Fatalf("labels does not contain %s", want)
 				}
 			}
+		}
+	}
+}
+
+func TestForwardSetsNeverMarkSpam(t *testing.T) {
+	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
+		"INBOX": []uint32{1},
+	}, false)
+	defer ts.CloseServer()
+
+	config := &configImap{
+		Address: addr,
+		Folders: map[string][]string{
+			"INBOX": {"INBOX"},
+		},
+		NeverMarkSpam: map[string]bool{
+			"INBOX": true,
+		},
+	}
+	inbox := &mocks.MockInbox{}
+	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+		t.Fatalf("Error executing forwardAndIdle: %v", err)
+	}
+
+	{
+		got := len(inbox.Messages)
+		if got != 1 {
+			t.Fatalf("len(inbox.messages) = %d; want 1", got)
+		}
+	}
+
+	{
+		got := inbox.Messages[0].NeverMarkSpam
+		if !got {
+			t.Fatalf("Messages[0].NeverMarkSpam = %v; want true", got)
+		}
+	}
+}
+
+func TestForwardSetsProcessForCalendar(t *testing.T) {
+	ts, addr := mocks.CreateTestServer(map[string]([]uint32){
+		"INBOX": []uint32{1},
+	}, false)
+	defer ts.CloseServer()
+
+	config := &configImap{
+		Address: addr,
+		Folders: map[string][]string{
+			"INBOX": {"INBOX"},
+		},
+		ProcessForCalendar: map[string]bool{
+			"INBOX": false,
+		},
+	}
+	inbox := &mocks.MockInbox{}
+	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+		t.Fatalf("Error executing forwardAndIdle: %v", err)
+	}
+
+	{
+		got := len(inbox.Messages)
+		if got != 1 {
+			t.Fatalf("len(inbox.messages) = %d; want 1", got)
+		}
+	}
+
+	{
+		got := inbox.Messages[0].NeverMarkSpam
+		if got {
+			t.Fatalf("Messages[0].NeverMarkSpam = %v; want false", got)
 		}
 	}
 }

@@ -30,7 +30,7 @@ If running cost is a concern, you needn't necessarily pay for a VPS just to run 
 
 #### What about other self-hosted solutions? [Fetch2Gmail](https://github.com/threehappypenguins/fetch2gmail)? [InboxBridge](https://github.com/tdferreira/inboxbridge)?
 
-Brevity is the soul of wit: Turbogmailify accomplishes everything it needs to do in less than 600 lines of easily auditable Go [code](main.go) (reputable imports excepted). There are no web UI's, SQL databases, or giant LLM-written commits here. As of July 2026, Turbogmailify also includes key features that Fetch2Gmail does not, such as support for IMAP IDLE, support for checking multiple IMAP folders, and support for Gmail labels.
+Brevity is the soul of wit: Turbogmailify accomplishes everything it needs to do in less than 1000 lines of easily auditable Go [code](main.go) (reputable imports excepted). There are no web UI's, SQL databases, or giant LLM-written commits here. As of July 2026, Turbogmailify also includes key features that Fetch2Gmail does not, such as support for IMAP IDLE, support for checking multiple IMAP folders, and support for Gmail labels.
 
 Turbogmailify's development history dates back to [2024](https://youngryan.com/2024/check-emails-from-gmail-briskly-go-getmail/) and has served as the author's principal way to import email since then. Knock on wood, it has yet to lose a single message.
 
@@ -218,6 +218,68 @@ IdleFolder = "INBOX"
   "Imap": [
     {
       "IdleFolder": "INBOX"
+    }
+  ]
+}
+```
+
+##### Imap.NeverMarkSpam
+
+A collection of key-value pairs that maps IMAP folder names to booleans. Specifying this mapping is optional. It sets the Gmail "Never Mark Spam" flag for uploaded emails on a per-folder basis.
+
+The wildcard key `*` specifies a boolean value for any source folders that do not already have explicit mappings.
+
+If no mapping is configured, the default mapping is the one depicted in this sample:
+
+```toml
+[[Imap]]
+# Insert other Imap values here.
+
+# The order of these headings is significant. We are using an inline table.
+[Imap.NeverMarkSpam]
+Junk = true # because we expect to add the spam label anyway
+"*" = false # a boolean; no quotes
+```
+
+```json
+{
+  "Imap": [
+    {
+      "NeverMarkSpam": {
+        "Junk": true,
+        "*": false
+      }
+    }
+  ]
+}
+```
+
+##### Imap.ProcessForCalendar
+
+A collection of key-value pairs that maps IMAP folder names to booleans. Specifying this mapping is optional. It sets the Gmail "Process For Calendar" flag for uploaded emails on a per-folder basis.
+
+The wildcard key `*` specifies a boolean value for any source folders that do not already have explicit mappings.
+
+If no mapping is configured, the default mapping is the one depicted in this sample:
+
+```toml
+[[Imap]]
+# Insert other Imap values here.
+
+# The order of these headings is significant. We are using an inline table.
+[Imap.ProcessForCalendar]
+Junk = false # a boolean; no quotes
+"*" = true
+```
+
+```json
+{
+  "Imap": [
+    {
+      "ProcessForCalendar": {
+        "Junk": false,
+        "*": true
+      }
     }
   ]
 }

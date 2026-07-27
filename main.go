@@ -110,13 +110,15 @@ type config struct {
 }
 
 type configImap struct {
-	Address        string
-	Username       string
-	Password       string
-	Folders        map[string][]string
-	ArchiveFolders map[string]string
-	FailedFolders  map[string]string
-	IdleFolder     string // folder to IDLE on; defaults to "INBOX" if empty
+	Address            string
+	Username           string
+	Password           string
+	Folders            map[string][]string
+	ArchiveFolders     map[string]string
+	FailedFolders      map[string]string
+	NeverMarkSpam      map[string]bool
+	ProcessForCalendar map[string]bool
+	IdleFolder         string // folder to IDLE on; defaults to "INBOX" if empty
 }
 
 func (c *config) getOAuthConfig() (oa *oauth2.Config) {
@@ -213,11 +215,13 @@ func doForwarding(ctx context.Context, c *config) {
 }
 
 type forwardConfig struct {
-	Id                  string
-	FolderToLabels      map[string][]string
-	FolderToArchive     map[string]string
-	FolderToFailed      map[string]string
-	FolderOrderIdleLast []string
+	Id                         string
+	FolderToLabels             map[string][]string
+	FolderToArchive            map[string]string
+	FolderToFailed             map[string]string
+	FolderToNeverMarkSpam      map[string]bool
+	FolderToProcessForCalendar map[string]bool
+	FolderOrderIdleLast        []string
 }
 
 func createForwardConfig(c *configImap) forwardConfig {
@@ -263,23 +267,70 @@ func createForwardConfig(c *configImap) forwardConfig {
 		FolderToLabels: folders,
 		// Reusing ordered is more convenient than iterating through all the
 		// keys in folders just to produce a slice.
-		FolderToArchive:     mapWithFallback(c.ArchiveFolders, ordered),
-		FolderToFailed:      mapWithFallback(c.FailedFolders, ordered),
+		FolderToArchive: folderMap[string]{m: c.ArchiveFolders, folders: ordered}.wildcard().done(),
+		FolderToFailed:  folderMap[string]{m: c.FailedFolders, folders: ordered}.wildcard().done(),
+		FolderToNeverMarkSpam: folderMap[bool]{m: c.NeverMarkSpam, folders: ordered}.def(map[string]bool{
+			"Junk": true,
+		}).wildcard().fallback(false).done(),
+		FolderToProcessForCalendar: folderMap[bool]{m: c.ProcessForCalendar, folders: ordered}.def(map[string]bool{
+			"Junk": false,
+		}).wildcard().fallback(true).done(),
 		FolderOrderIdleLast: ordered,
 	}
 }
 
-func mapWithFallback[V any](src map[string]V, keys []string) (m map[string]V) {
-	fallback, isFallback := src["*"]
-	m = make(map[string]V, len(keys))
-	for _, k := range keys {
-		if v, ok := src[k]; ok {
+// A map of IMAP folders to configuration values that includes a list of all
+// possible keys (folders).
+type folderMap[V any] struct {
+	m       map[string]V
+	folders []string
+}
+
+// Specifies a default map if the user has not already configured one.
+func (fm folderMap[V]) def(def map[string]V) folderMap[V] {
+	var m map[string]V
+	if len(fm.m) <= 0 {
+		m = def
+	} else {
+		m = fm.m
+	}
+	folders := fm.folders
+	return folderMap[V]{m, folders}
+}
+
+// Adds the wildcard (*) value to the map, which populates a value for all
+// folders that do not already have explicit values.
+func (fm folderMap[V]) wildcard() folderMap[V] {
+	wildcard, isWildcard := fm.m["*"]
+	m := make(map[string]V, len(fm.folders))
+	for _, k := range fm.folders {
+		if v, ok := fm.m[k]; ok {
 			m[k] = v
-		} else if isFallback {
-			m[k] = fallback
+		} else if isWildcard {
+			m[k] = wildcard
 		}
 	}
-	return
+	folders := fm.folders
+	return folderMap[V]{m, folders}
+}
+
+// Specifies a fallback value so that every folder is mapped to something.
+func (fm folderMap[V]) fallback(fb V) folderMap[V] {
+	m := make(map[string]V, len(fm.folders))
+	for _, k := range fm.folders {
+		if v, ok := fm.m[k]; ok {
+			m[k] = v
+		} else {
+			m[k] = fb
+		}
+	}
+	folders := fm.folders
+	return folderMap[V]{m, folders}
+}
+
+// Finalizes this structure into an ordinary map.
+func (fm folderMap[V]) done() map[string]V {
+	return fm.m
 }
 
 type session struct {
@@ -369,7 +420,7 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 				"Importing message received by %s (folder %s, size %s, subject %s)",
 				f.Id, folder, sum.size, sum.subject)
 
-			if err := gm.DoImport(envelope, labels...); err != nil {
+			if err := gm.DoImport(envelope, f.FolderToNeverMarkSpam[folder], f.FolderToProcessForCalendar[folder], labels...); err != nil {
 				log.Printf("Error importing message: %v", err)
 				if isImportRetryable(err) {
 					// Leave it alone; try again next cycle.
@@ -486,18 +537,18 @@ func messageSummary(envelope []byte) summary {
 // A Gmail target that can accept imported messages. This is an interface for
 // testing purposes.
 type gmailInbox interface {
-	DoImport(envelope []byte, labels ...string) error
+	DoImport(envelope []byte, neverMarkSpam, processForCalendar bool, labels ...string) error
 }
 
 type gmailInboxReal gmail.Service
 
 // Import this message to Gmail via media upload.
-func (gm *gmailInboxReal) DoImport(envelope []byte, labels ...string) error {
+func (gm *gmailInboxReal) DoImport(envelope []byte, neverMarkSpam, processForCalendar bool, labels ...string) error {
 	r, err := gm.Users.Messages.
 		Import("me", &gmail.Message{LabelIds: append(labels, "UNREAD")}).
 		InternalDateSource("dateHeader").
-		NeverMarkSpam(false).
-		ProcessForCalendar(true).
+		NeverMarkSpam(neverMarkSpam).
+		ProcessForCalendar(processForCalendar).
 		Deleted(false).
 		Media(
 			bytes.NewReader(envelope),
@@ -539,7 +590,7 @@ Content-Type: text/plain
 
 %s
 `, subject, body)
-	return gm.DoImport([]byte(envelope), "INBOX")
+	return gm.DoImport([]byte(envelope), true, false, "INBOX")
 }
 
 // Move a message into another mailbox using IMAP MOVE or, if that command is
