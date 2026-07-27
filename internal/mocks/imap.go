@@ -146,20 +146,16 @@ func (s *TestServer) Fetch(w *imapserver.FetchWriter, numSet imap.NumSet, option
 
 	msg := w.CreateMessage(1)
 	msg.WriteUID(imap.UID(uid))
-	msg.WriteEnvelope(&imap.Envelope{
-		Subject: "Hello, World!",
-		From: []imap.Address{
-			{
-				Mailbox: "bob",
-				Host:    "example.com",
-			},
-		},
-	})
-	body := []byte("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.")
-	bw := msg.WriteBodySection(&imap.FetchItemBodySection{}, int64(len(body)))
-	bw.Write(body)
+	defer msg.Close()
+
+	envelope := []byte(`Subject: Hello, World!
+From: bob@example.com
+Content-Type: text/plain
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`)
+	bw := msg.WriteBodySection(&imap.FetchItemBodySection{}, int64(len(envelope)))
+	bw.Write(envelope)
 	bw.Close()
-	msg.Close()
 
 	return nil
 }

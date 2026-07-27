@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/mail"
 	"net/url"
 	"os"
 	"strings"
@@ -363,10 +364,10 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 				continue
 			}
 
-			sizeKB := float32(len(envelope)) / 1024
+			sum := messageSummary(envelope)
 			log.Printf(
-				"Importing message received by %s (uid %d, size %.1fK, folder %s)",
-				f.Id, uid, sizeKB, folder)
+				"Importing message received by %s (folder %s, size %s, subject %s)",
+				f.Id, folder, sum.size, sum.subject)
 
 			if err := gm.DoImport(envelope, labels...); err != nil {
 				log.Printf("Error importing message: %v", err)
@@ -381,7 +382,7 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 					} else {
 						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be done with the FailedFolders option."
 					}
-					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", f.Id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nUID: %d\nSize: %1.fK\n\n%s", err, f.Id, folder, uid, sizeKB, disposition))
+					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", f.Id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, f.Id, folder, sum.subject, sum.messageId, sum.size, disposition))
 				}
 			} else {
 				successUids = append(successUids, uid)
@@ -459,6 +460,29 @@ func (s *session) fetchMessage(seq uint32) (uid imap.UID, data []byte, err error
 	return
 }
 
+type summary struct {
+	size      string
+	subject   string
+	messageId string
+}
+
+func messageSummary(envelope []byte) summary {
+	print(string(envelope))
+	size := fmt.Sprintf("%.1fK", float32(len(envelope))/1024)
+	msg, err := mail.ReadMessage(bytes.NewReader(envelope))
+	if err == nil {
+		return summary{
+			size:      size,
+			subject:   msg.Header.Get("Subject"),
+			messageId: msg.Header.Get("Message-ID"),
+		}
+	} else {
+		return summary{
+			size: size,
+		}
+	}
+}
+
 // A Gmail target that can accept imported messages. This is an interface for
 // testing purposes.
 type gmailInbox interface {
@@ -509,6 +533,7 @@ func isImportRetryable(err error) bool {
 
 func sendNotification(gm gmailInbox, subject, body string) error {
 	envelope := fmt.Sprintf(`From: Turbogmailify <me>
+To: me
 Subject: %s
 Content-Type: text/plain
 
