@@ -518,7 +518,6 @@ type summary struct {
 }
 
 func messageSummary(envelope []byte) summary {
-	print(string(envelope))
 	size := fmt.Sprintf("%.1fK", float32(len(envelope))/1024)
 	msg, err := mail.ReadMessage(bytes.NewReader(envelope))
 	if err == nil {
