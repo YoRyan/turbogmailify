@@ -191,12 +191,12 @@ func doForwarding(ctx context.Context, c *config) {
 	for _, ic := range c.Imap {
 		go func() {
 			for {
-				s, err := createSession(&ic)
+				forwardConfig := createForwardConfig(&ic)
+				s, err := createSession(&ic, &forwardConfig)
 				if err != nil {
 					continue
 				}
 
-				forwardConfig := createForwardConfig(&ic)
 				for {
 					if err := s.forwardAndIdle(forwardConfig, gmInbox); err != nil {
 						break
@@ -342,7 +342,7 @@ type session struct {
 	importFailedUids map[string]map[imap.UID]struct{}
 }
 
-func createSession(c *configImap) (*session, error) {
+func createSession(c *configImap, f *forwardConfig) (*session, error) {
 	// Make a handler and channel to receive mailbox status updates.
 	var (
 		mailboxUpdate = make(chan *imapclient.UnilateralDataMailbox)
@@ -373,8 +373,8 @@ func createSession(c *configImap) (*session, error) {
 	}
 
 	// Pre-populate the importFailedUids map so it always works as expected.
-	importFailed := make(map[string]map[imap.UID]struct{}, len(c.Folders))
-	for folder := range c.Folders {
+	importFailed := make(map[string]map[imap.UID]struct{}, len(f.FolderOrderIdleLast))
+	for _, folder := range f.FolderOrderIdleLast {
 		importFailed[folder] = make(map[imap.UID]struct{}, 0)
 	}
 
