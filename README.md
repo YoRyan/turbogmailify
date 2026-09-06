@@ -113,7 +113,7 @@ Password = "hunter2"
 
 A collection of key-value pairs that maps IMAP folder names to *arrays* of Gmail labels. Specifying a mapping is optional; if this option is not supplied, Turbogmailify uses the INBOX and Junk mapping depicted in this sample.
 
-Please note that Gmail labels must be specified using their unique identifiers, not their human-readable names. For built-in "system" labels, these values are identical, but "user" labels have randomly generated identifiers. You can obtain these identifiers by running [this](https://gist.github.com/YoRyan/4f9d28531d2b2eb9014dcb2c627aa10b) Google App Script against [your account](https://script.google.com/home). 
+Please note that Gmail labels must be specified using their unique identifiers, not their human-readable names. For built-in "system" labels, these values are identical, but "user" labels have randomly generated identifiers. You can obtain these identifiers by running the Google App Script [included](/List%20Gmail%20Labels.js) in this repository against [your account](https://script.google.com/home). 
 
 ```toml
 [[Imap]]
