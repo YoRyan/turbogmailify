@@ -6,16 +6,16 @@ function listLabels() {
   console.log(
     "System Labels:\n\n" +
     labels
-      .filter(label => label.type === "system")
-      .map(label => label.id)
+      .filter(({ type }) => type === "system")
+      .map(({ id }) => id)
       .sort()
       .join("\n")
   );
   console.log(
     "User Labels:\n\n" +
     labels
-      .filter(label => label.type === "user")
-      .map(label => `${label.name} => ${label.id}`)
+      .filter(({ type }) => type === "user")
+      .map(({ name, id }) => `${name} => ${id}`)
       .sort()
       .join("\n")
   );
