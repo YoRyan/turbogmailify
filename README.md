@@ -48,14 +48,15 @@ To build the program yourself, install Go, and then run `go build` in the source
 
 ### Google Cloud Setup
 
-The setup process is very similar to that of [gogcli](https://github.com/steipete/gogcli?tab=readme-ov-file#quick-start), the Google CLI that has become so fashionable among OpenClaw users.
+The setup process is very similar to that of [gog](https://gogcli.sh/quickstart.html#2-get-an-oauth-client), the Google CLI that has become so fashionable among OpenClaw users.
 
 1. [Create](https://console.cloud.google.com/projectcreate) a project for your Turbogmailify instance in Google Cloud Console.
 2. [Enable](https://console.cloud.google.com/apis/api/gmail.googleapis.com) the Gmail API for this project.
 3. [Configure](https://console.cloud.google.com/auth/branding) your project's OAuth branding. Personal Google accounts can only create "External" projects, but this is okay.
 4. Your project will be initialized in the "Testing" state. You'll have to [add](https://console.cloud.google.com/auth/audience) yourself (or whichever Google account you want to forward mail to) as a test user.
-5. [Create](https://console.cloud.google.com/auth/clients) a new client for your project. Choose the "Desktop" type.
-6. Download the JSON secrets file that Google provides for your client.
+5. [Publish](https://console.cloud.google.com/auth/audience) your project to change its status to "In Production." This allows your credentials to live longer than 1 week. You do not need to complete the verification process.
+6. [Create](https://console.cloud.google.com/auth/clients) a new client for your project. Choose the "Desktop" type.
+7. Download the JSON secrets file that Google provides for your client.
 
 ### Write the Configuration File
 
