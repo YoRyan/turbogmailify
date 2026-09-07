@@ -429,7 +429,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 			Select(folder, nil).
 			Wait()
 		if err != nil {
-			slog.Error("SELECT error", "err", err)
+			slog.Error("SELECT error", "folder", folder, "err", err)
 			return networkRetryTime, err
 		}
 
@@ -455,7 +455,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 			slog.Info("Importing message", "account", fc.id, "folder", folder, "size", sum.size, "subject", sum.subject)
 
 			if err := gm.DoImport(envelope, fc.folderToNeverMarkSpam[folder], fc.folderToProcessForCalendar[folder], labels...); err != nil {
-				slog.Error("Error importing message", "err", err)
+				slog.Error("Error importing message", "messageId", sum.messageId, "err", err)
 				if isImportRetryable(err) {
 					// Leave it alone; try again next cycle.
 				} else {
@@ -467,6 +467,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 					} else {
 						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be accomplished with the FailedFolders option."
 					}
+					subject := fmt.Sprintf("Turbogmailify Import Failure: (%s %s)", fc.id, folder)
 					body := executeTemplate(
 						template.Must(template.New("body").Parse(`<table>
 <tr><td>Error:</td><td>{{ .Error }}</td></tr>
@@ -487,7 +488,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 							"Subject":   sum.subject,
 							"MessageID": sum.messageId,
 						})
-					sendHtmlNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.id, folder), body)
+					sendHtmlNotification(gm, subject, body)
 				}
 			} else {
 				successUids = append(successUids, uid)
