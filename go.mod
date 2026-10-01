@@ -1,11 +1,11 @@
 module github.com/YoRyan/turbogmailify
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/pelletier/go-toml/v2 v2.4.3
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.37.0
 	google.golang.org/api v0.290.0
 )
 
