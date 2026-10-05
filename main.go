@@ -194,15 +194,16 @@ func doForwarding(ctx context.Context, c *config) {
 				forwardConfig := createForwardConfig(&ic)
 				s, err := createSession(&ic, &forwardConfig)
 				if err != nil {
-					continue
+					goto coolOff
 				}
 
 				for {
 					if err := s.forwardAndIdle(forwardConfig, gmInbox); err != nil {
-						break
+						goto coolOff
 					}
 				}
 
+			coolOff:
 				// Error'd out. Cool down and try again.
 				time.Sleep(maxPollTime)
 			}
