@@ -194,19 +194,20 @@ func doForwarding(ctx context.Context, c *config) {
 			importFailedUids := forwardConfig.createUidMap[struct{}]()
 			for {
 				forwardConfig := createForwardConfig(&ic)
-				s, err := createSession(&ic, &forwardConfig, importFailedUids)
+				s, err := connectSession(&ic, &forwardConfig, importFailedUids)
 				if err != nil {
-					goto coolOff
+					goto CoolOff
 				}
 
 				for {
 					if err := s.forwardAndIdle(gmInbox); err != nil {
-						goto coolOff
+						goto CoolOff
 					}
 				}
 
-			coolOff:
-				// Error'd out. Cool down and try again.
+			CoolOff:
+				// Error'd out, probably network or credentials. Cool down
+				// and try again.
 				time.Sleep(maxPollTime)
 			}
 		}()
@@ -218,13 +219,13 @@ func doForwarding(ctx context.Context, c *config) {
 }
 
 type forwardConfig struct {
-	Id                         string
-	FolderToLabels             map[string][]string
-	FolderToArchive            map[string]string
-	FolderToFailed             map[string]string
-	FolderToNeverMarkSpam      map[string]bool
-	FolderToProcessForCalendar map[string]bool
-	FolderOrderIdleLast        []string
+	id                         string
+	folderToLabels             map[string][]string
+	folderToArchive            map[string]string
+	folderToFailed             map[string]string
+	folderToNeverMarkSpam      map[string]bool
+	folderToProcessForCalendar map[string]bool
+	folderOrderIdleLast        []string
 }
 
 func createForwardConfig(c *configImap) forwardConfig {
@@ -266,27 +267,27 @@ func createForwardConfig(c *configImap) forwardConfig {
 	ordered = append(ordered, idle)
 
 	return forwardConfig{
-		Id:             c.Username,
-		FolderToLabels: folders,
+		id:             c.Username,
+		folderToLabels: folders,
 		// Reusing ordered is more convenient than iterating through all the
 		// keys in folders just to produce a slice.
-		FolderToArchive: folderMap[string]{m: c.ArchiveFolders, folders: ordered}.wildcard().done(),
-		FolderToFailed:  folderMap[string]{m: c.FailedFolders, folders: ordered}.wildcard().done(),
-		FolderToNeverMarkSpam: folderMap[bool]{m: c.NeverMarkSpam, folders: ordered}.def(map[string]bool{
+		folderToArchive: folderMap[string]{m: c.ArchiveFolders, folders: ordered}.wildcard().done(),
+		folderToFailed:  folderMap[string]{m: c.FailedFolders, folders: ordered}.wildcard().done(),
+		folderToNeverMarkSpam: folderMap[bool]{m: c.NeverMarkSpam, folders: ordered}.def(map[string]bool{
 			"Junk": true,
 		}).wildcard().fallback(false).done(),
-		FolderToProcessForCalendar: folderMap[bool]{m: c.ProcessForCalendar, folders: ordered}.def(map[string]bool{
+		folderToProcessForCalendar: folderMap[bool]{m: c.ProcessForCalendar, folders: ordered}.def(map[string]bool{
 			"Junk": false,
 		}).wildcard().fallback(true).done(),
-		FolderOrderIdleLast: ordered,
+		folderOrderIdleLast: ordered,
 	}
 }
 
 // Initialize a nested map that accepts (mailbox, uid) tuples. For now, we
 // ignore UID validity, as no use case of this structure survives restarts.
 func (f forwardConfig) createUidMap[V any]() map[string]map[imap.UID]V {
-	m := make(map[string]map[imap.UID]V, len(f.FolderOrderIdleLast))
-	for _, folder := range f.FolderOrderIdleLast {
+	m := make(map[string]map[imap.UID]V, len(f.folderOrderIdleLast))
+	for _, folder := range f.folderOrderIdleLast {
 		m[folder] = make(map[imap.UID]V, 0)
 	}
 	return m
@@ -354,7 +355,7 @@ type session struct {
 	importFailedUids map[string]map[imap.UID]struct{}
 }
 
-func createSession(c *configImap, f *forwardConfig, importFailedUids map[string]map[imap.UID]struct{}) (*session, error) {
+func connectSession(c *configImap, f *forwardConfig, importFailedUids map[string]map[imap.UID]struct{}) (*session, error) {
 	// Make a handler and channel to receive mailbox status updates.
 	var (
 		mailboxUpdate = make(chan *imapclient.UnilateralDataMailbox)
@@ -392,8 +393,8 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 	// Interrogate each folder and retrieve and process everything inside.
 	// Idle folder is always last so it remains selected when we enter IDLE.
 	fc := s.config
-	for _, folder := range fc.FolderOrderIdleLast {
-		labels := fc.FolderToLabels[folder]
+	for _, folder := range fc.folderOrderIdleLast {
+		labels := fc.folderToLabels[folder]
 
 		// SELECT picks the desired folder and also comes with a message count.
 		inbox, err := s.client.
@@ -410,7 +411,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 			successUids = make([]imap.UID, 0)
 			failUids    = make([]imap.UID, 0)
 		)
-		failFolder, failFolderOk := fc.FolderToFailed[folder]
+		failFolder, failFolderOk := fc.folderToFailed[folder]
 		for i := range inbox.NumMessages {
 			uid, envelope, err := s.fetchMessage(i + 1)
 			if err != nil {
@@ -425,9 +426,9 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 			sum := messageSummary(envelope)
 			log.Printf(
 				"Importing message received by %s (folder %s, size %s, subject %s)",
-				fc.Id, folder, sum.size, sum.subject)
+				fc.id, folder, sum.size, sum.subject)
 
-			if err := gm.DoImport(envelope, fc.FolderToNeverMarkSpam[folder], fc.FolderToProcessForCalendar[folder], labels...); err != nil {
+			if err := gm.DoImport(envelope, fc.folderToNeverMarkSpam[folder], fc.folderToProcessForCalendar[folder], labels...); err != nil {
 				log.Printf("Error importing message: %v", err)
 				if isImportRetryable(err) {
 					// Leave it alone; try again next cycle.
@@ -440,14 +441,14 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 					} else {
 						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be done with the FailedFolders option."
 					}
-					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.Id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, fc.Id, folder, sum.subject, sum.messageId, sum.size, disposition))
+					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, fc.id, folder, sum.subject, sum.messageId, sum.size, disposition))
 				}
 			} else {
 				successUids = append(successUids, uid)
 			}
 		}
 
-		if dest, ok := fc.FolderToArchive[folder]; ok {
+		if dest, ok := fc.folderToArchive[folder]; ok {
 			// Move to the configured archive folder.
 			for _, uid := range successUids {
 				if err := s.moveMessage(uid, dest); err != nil {

@@ -56,22 +56,22 @@ func TestConfigFromDefault(t *testing.T) {
 	fc := createForwardConfig(&configImap{})
 
 	{
-		got := len(fc.FolderToLabels)
+		got := len(fc.folderToLabels)
 		if got != 2 {
 			t.Fatalf("len(FolderToLabels) = %d; want 2", got)
 		}
 	}
 
 	{
-		got := len(fc.FolderToArchive)
+		got := len(fc.folderToArchive)
 		if got != 0 {
 			t.Fatalf("len(FolderToArchive) = %d; want 0", got)
 		}
 	}
 
-	slicesEqual(t, []string{"INBOX"}, fc.FolderToLabels["INBOX"])
-	slicesEqual(t, []string{"SPAM"}, fc.FolderToLabels["Junk"])
-	slicesEqual(t, []string{"Junk", "INBOX"}, fc.FolderOrderIdleLast)
+	slicesEqual(t, []string{"INBOX"}, fc.folderToLabels["INBOX"])
+	slicesEqual(t, []string{"SPAM"}, fc.folderToLabels["Junk"])
+	slicesEqual(t, []string{"Junk", "INBOX"}, fc.folderOrderIdleLast)
 }
 
 func TestConfigMissingIdleFolder(t *testing.T) {
@@ -79,13 +79,13 @@ func TestConfigMissingIdleFolder(t *testing.T) {
 		Folders: map[string]([]string){"Junk": []string{"SPAM"}, "INBOX": []string{"INBOX"}},
 	})
 
-	got := len(fc.FolderOrderIdleLast)
+	got := len(fc.folderOrderIdleLast)
 	if got != 2 {
 		t.Fatalf("len(FolderOrderIdleLast) = %d; want 2", got)
 	}
 
 	folders := make(map[string]struct{})
-	for _, f := range fc.FolderOrderIdleLast {
+	for _, f := range fc.folderOrderIdleLast {
 		folders[f] = struct{}{}
 	}
 	if _, ok := folders["INBOX"]; !ok {
@@ -103,14 +103,14 @@ func TestConfigExplicitIdleFolder(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderOrderIdleLast)
+		got := len(fc.folderOrderIdleLast)
 		if got != 3 {
 			t.Fatalf("len(FolderOrderIdleLast) = %d; want 3", got)
 		}
 	}
 
 	folders := make(map[string]struct{})
-	for _, f := range fc.FolderOrderIdleLast {
+	for _, f := range fc.folderOrderIdleLast {
 		folders[f] = struct{}{}
 	}
 	if _, ok := folders["INBOX"]; !ok {
@@ -121,7 +121,7 @@ func TestConfigExplicitIdleFolder(t *testing.T) {
 	}
 
 	{
-		got := fc.FolderOrderIdleLast[len(fc.FolderOrderIdleLast)-1]
+		got := fc.folderOrderIdleLast[len(fc.folderOrderIdleLast)-1]
 		if got != "CustomFolder" {
 			t.Fatalf("last FolderOrderIdleLast = %s; want CustomFolder", got)
 		}
@@ -141,19 +141,19 @@ func TestConfigArchiveDefined(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToArchive)
+		got := len(fc.folderToArchive)
 		if got != 2 {
 			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["INBOX"]
+		got := fc.folderToArchive["INBOX"]
 		if got != "Archive" {
 			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["Junk"]
+		got := fc.folderToArchive["Junk"]
 		if got != "ArchiveJunk" {
 			t.Fatalf("FolderToArchive[Junk] = %s; want ArchiveJunk", got)
 		}
@@ -169,19 +169,19 @@ func TestConfigArchiveDefinedWithDefaultFolders(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToArchive)
+		got := len(fc.folderToArchive)
 		if got != 2 {
 			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["INBOX"]
+		got := fc.folderToArchive["INBOX"]
 		if got != "Archive" {
 			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["Junk"]
+		got := fc.folderToArchive["Junk"]
 		if got != "ArchiveJunk" {
 			t.Fatalf("FolderToArchive[Junk] = %s; want ArchiveJunk", got)
 		}
@@ -200,13 +200,13 @@ func TestConfigArchivePartial(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToArchive)
+		got := len(fc.folderToArchive)
 		if got != 1 {
 			t.Fatalf("len(FolderToArchive) = %d; want 1", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["INBOX"]
+		got := fc.folderToArchive["INBOX"]
 		if got != "Archive" {
 			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
 		}
@@ -226,19 +226,19 @@ func TestConfigArchivePartialWithFallback(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToArchive)
+		got := len(fc.folderToArchive)
 		if got != 2 {
 			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["INBOX"]
+		got := fc.folderToArchive["INBOX"]
 		if got != "Archive" {
 			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["Junk"]
+		got := fc.folderToArchive["Junk"]
 		if got != "ArchiveJunk" {
 			t.Fatalf("FolderToArchive[Junk] = %s; want ArchiveJunk", got)
 		}
@@ -257,19 +257,19 @@ func TestConfigArchiveOnlyFallback(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToArchive)
+		got := len(fc.folderToArchive)
 		if got != 2 {
 			t.Fatalf("len(FolderToArchive) = %d; want 2", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["INBOX"]
+		got := fc.folderToArchive["INBOX"]
 		if got != "Archive" {
 			t.Fatalf("FolderToArchive[INBOX] = %s; want Archive", got)
 		}
 	}
 	{
-		got := fc.FolderToArchive["Junk"]
+		got := fc.folderToArchive["Junk"]
 		if got != "Archive" {
 			t.Fatalf("FolderToArchive[Junk] = %s; want Archive", got)
 		}
@@ -289,19 +289,19 @@ func TestConfigFailedDefined(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToFailed)
+		got := len(fc.folderToFailed)
 		if got != 2 {
 			t.Fatalf("len(FolderToFailed) = %d; want 2", got)
 		}
 	}
 	{
-		got := fc.FolderToFailed["INBOX"]
+		got := fc.folderToFailed["INBOX"]
 		if got != "Failed" {
 			t.Fatalf("FolderToFailed[INBOX] = %s; want Failed", got)
 		}
 	}
 	{
-		got := fc.FolderToFailed["Junk"]
+		got := fc.folderToFailed["Junk"]
 		if got != "FailedJunk" {
 			t.Fatalf("FolderToFailed[Junk] = %s; want FailedJunk", got)
 		}
@@ -320,13 +320,13 @@ func TestConfigFailedPartial(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToFailed)
+		got := len(fc.folderToFailed)
 		if got != 1 {
 			t.Fatalf("len(FolderToFailed) = %d; want 1", got)
 		}
 	}
 	{
-		got := fc.FolderToFailed["INBOX"]
+		got := fc.folderToFailed["INBOX"]
 		if got != "Failed" {
 			t.Fatalf("FolderToFailed[INBOX] = %s; want Failed", got)
 		}
@@ -346,19 +346,19 @@ func TestConfigFailedPartialWithFallback(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToFailed)
+		got := len(fc.folderToFailed)
 		if got != 2 {
 			t.Fatalf("len(FolderToFailed) = %d; want 2", got)
 		}
 	}
 	{
-		got := fc.FolderToFailed["INBOX"]
+		got := fc.folderToFailed["INBOX"]
 		if got != "Failed" {
 			t.Fatalf("FolderToFailed[INBOX] = %s; want Failed", got)
 		}
 	}
 	{
-		got := fc.FolderToFailed["Junk"]
+		got := fc.folderToFailed["Junk"]
 		if got != "FailedJunk" {
 			t.Fatalf("FolderToFailed[Junk] = %s; want FailedJunk", got)
 		}
@@ -379,25 +379,25 @@ func TestConfigNeverMarkSpam(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToNeverMarkSpam)
+		got := len(fc.folderToNeverMarkSpam)
 		if got != 3 {
 			t.Fatalf("len(FolderToNeverMarkSpam) = %d; want 3", got)
 		}
 	}
 	{
-		got := fc.FolderToNeverMarkSpam["INBOX"]
+		got := fc.folderToNeverMarkSpam["INBOX"]
 		if !got {
 			t.Fatalf("FolderToNeverMarkSpam[INBOX] = %v; want true", got)
 		}
 	}
 	{
-		got := fc.FolderToNeverMarkSpam["CustomFolder"]
+		got := fc.folderToNeverMarkSpam["CustomFolder"]
 		if got {
 			t.Fatalf("FolderToNeverMarkSpam[CustomFolder] = %v; want false", got)
 		}
 	}
 	{
-		got := fc.FolderToNeverMarkSpam["Junk"]
+		got := fc.folderToNeverMarkSpam["Junk"]
 		if got {
 			t.Fatalf("FolderToNeverMarkSpam[Junk] = %v; want false", got)
 		}
@@ -407,7 +407,7 @@ func TestConfigNeverMarkSpam(t *testing.T) {
 func TestConfigNeverMarkSpamDefault(t *testing.T) {
 	fc := createForwardConfig(&configImap{})
 
-	got := fc.FolderToNeverMarkSpam["Junk"]
+	got := fc.folderToNeverMarkSpam["Junk"]
 	if !got {
 		t.Fatalf("FolderToNeverMarkSpam[Junk] = %v; want true", got)
 	}
@@ -427,25 +427,25 @@ func TestConfigProcessForCalendar(t *testing.T) {
 	})
 
 	{
-		got := len(fc.FolderToProcessForCalendar)
+		got := len(fc.folderToProcessForCalendar)
 		if got != 3 {
 			t.Fatalf("len(FolderToProcessForCalendar) = %d; want 3", got)
 		}
 	}
 	{
-		got := fc.FolderToProcessForCalendar["INBOX"]
+		got := fc.folderToProcessForCalendar["INBOX"]
 		if !got {
 			t.Fatalf("FolderToProcessForCalendar[INBOX] = %v; want true", got)
 		}
 	}
 	{
-		got := fc.FolderToProcessForCalendar["CustomFolder"]
+		got := fc.folderToProcessForCalendar["CustomFolder"]
 		if !got {
 			t.Fatalf("FolderToProcessForCalendar[CustomFolder] = %v; want true", got)
 		}
 	}
 	{
-		got := fc.FolderToProcessForCalendar["Junk"]
+		got := fc.folderToProcessForCalendar["Junk"]
 		if got {
 			t.Fatalf("FolderToProcessForCalendar[Junk] = %v; want false", got)
 		}
@@ -455,7 +455,7 @@ func TestConfigProcessForCalendar(t *testing.T) {
 func TestConfigProcessForCalendarDefault(t *testing.T) {
 	fc := createForwardConfig(&configImap{})
 
-	got := fc.FolderToProcessForCalendar["Junk"]
+	got := fc.folderToProcessForCalendar["Junk"]
 	if got {
 		t.Fatalf("FolderToProcessForCalendar[Junk] = %v; want false", got)
 	}
@@ -1133,7 +1133,7 @@ func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 			head = s
 		}
 	}
-	slicesEqual(t, createForwardConfig(config).FolderOrderIdleLast, distinct)
+	slicesEqual(t, createForwardConfig(config).folderOrderIdleLast, distinct)
 }
 
 func TestIdleFolderSelectIsLast(t *testing.T) {
