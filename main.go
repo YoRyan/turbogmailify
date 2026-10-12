@@ -190,15 +190,17 @@ func doForwarding(ctx context.Context, c *config) {
 	// Spin up a goroutine for each IMAP connection.
 	for _, ic := range c.Imap {
 		go func() {
+			forwardConfig := createForwardConfig(&ic)
+			importFailedUids := forwardConfig.createUidMap[struct{}]()
 			for {
 				forwardConfig := createForwardConfig(&ic)
-				s, err := createSession(&ic, &forwardConfig)
+				s, err := createSession(&ic, &forwardConfig, importFailedUids)
 				if err != nil {
 					goto coolOff
 				}
 
 				for {
-					if err := s.forwardAndIdle(forwardConfig, gmInbox); err != nil {
+					if err := s.forwardAndIdle(gmInbox); err != nil {
 						goto coolOff
 					}
 				}
@@ -280,6 +282,16 @@ func createForwardConfig(c *configImap) forwardConfig {
 	}
 }
 
+// Initialize a nested map that accepts (mailbox, uid) tuples. For now, we
+// ignore UID validity, as no use case of this structure survives restarts.
+func (f forwardConfig) createUidMap[V any]() map[string]map[imap.UID]V {
+	m := make(map[string]map[imap.UID]V, len(f.FolderOrderIdleLast))
+	for _, folder := range f.FolderOrderIdleLast {
+		m[folder] = make(map[imap.UID]V, 0)
+	}
+	return m
+}
+
 // A map of IMAP folders to configuration values that includes a list of all
 // possible keys (folders).
 type folderMap[V any] struct {
@@ -335,15 +347,14 @@ func (fm folderMap[V]) done() map[string]V {
 }
 
 type session struct {
-	client        *imapclient.Client
-	mailboxUpdate <-chan *imapclient.UnilateralDataMailbox
-	idleDeadline  time.Duration
-	// Set of (mailbox, uid) tuples that failed to import. (This structure does
-	// not survive restarts, so we'll ignore uid validity.)
+	client           *imapclient.Client
+	config           *forwardConfig
+	mailboxUpdate    <-chan *imapclient.UnilateralDataMailbox
+	idleDeadline     time.Duration
 	importFailedUids map[string]map[imap.UID]struct{}
 }
 
-func createSession(c *configImap, f *forwardConfig) (*session, error) {
+func createSession(c *configImap, f *forwardConfig, importFailedUids map[string]map[imap.UID]struct{}) (*session, error) {
 	// Make a handler and channel to receive mailbox status updates.
 	var (
 		mailboxUpdate = make(chan *imapclient.UnilateralDataMailbox)
@@ -373,21 +384,16 @@ func createSession(c *configImap, f *forwardConfig) (*session, error) {
 		return nil, err
 	}
 
-	// Pre-populate the importFailedUids map so it always works as expected.
-	importFailed := make(map[string]map[imap.UID]struct{}, len(f.FolderOrderIdleLast))
-	for _, folder := range f.FolderOrderIdleLast {
-		importFailed[folder] = make(map[imap.UID]struct{}, 0)
-	}
-
-	return &session{client, mailboxUpdate, maxPollTime, importFailed}, nil
+	return &session{client, f, mailboxUpdate, maxPollTime, importFailedUids}, nil
 }
 
 // Make a new connection to the IMAP server and retrieve and process messages.
-func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
+func (s *session) forwardAndIdle(gm gmailInbox) error {
 	// Interrogate each folder and retrieve and process everything inside.
 	// Idle folder is always last so it remains selected when we enter IDLE.
-	for _, folder := range f.FolderOrderIdleLast {
-		labels := f.FolderToLabels[folder]
+	fc := s.config
+	for _, folder := range fc.FolderOrderIdleLast {
+		labels := fc.FolderToLabels[folder]
 
 		// SELECT picks the desired folder and also comes with a message count.
 		inbox, err := s.client.
@@ -404,7 +410,7 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 			successUids = make([]imap.UID, 0)
 			failUids    = make([]imap.UID, 0)
 		)
-		failFolder, failFolderOk := f.FolderToFailed[folder]
+		failFolder, failFolderOk := fc.FolderToFailed[folder]
 		for i := range inbox.NumMessages {
 			uid, envelope, err := s.fetchMessage(i + 1)
 			if err != nil {
@@ -419,9 +425,9 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 			sum := messageSummary(envelope)
 			log.Printf(
 				"Importing message received by %s (folder %s, size %s, subject %s)",
-				f.Id, folder, sum.size, sum.subject)
+				fc.Id, folder, sum.size, sum.subject)
 
-			if err := gm.DoImport(envelope, f.FolderToNeverMarkSpam[folder], f.FolderToProcessForCalendar[folder], labels...); err != nil {
+			if err := gm.DoImport(envelope, fc.FolderToNeverMarkSpam[folder], fc.FolderToProcessForCalendar[folder], labels...); err != nil {
 				log.Printf("Error importing message: %v", err)
 				if isImportRetryable(err) {
 					// Leave it alone; try again next cycle.
@@ -434,14 +440,14 @@ func (s *session) forwardAndIdle(f forwardConfig, gm gmailInbox) error {
 					} else {
 						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be done with the FailedFolders option."
 					}
-					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", f.Id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, f.Id, folder, sum.subject, sum.messageId, sum.size, disposition))
+					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.Id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, fc.Id, folder, sum.subject, sum.messageId, sum.size, disposition))
 				}
 			} else {
 				successUids = append(successUids, uid)
 			}
 		}
 
-		if dest, ok := f.FolderToArchive[folder]; ok {
+		if dest, ok := fc.FolderToArchive[folder]; ok {
 			// Move to the configured archive folder.
 			for _, uid := range successUids {
 				if err := s.moveMessage(uid, dest); err != nil {

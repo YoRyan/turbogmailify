@@ -31,14 +31,9 @@ func createTestSession(c *configImap) *session {
 		Login(c.Username, c.Password).
 		Wait()
 
-	// Pre-populate the importFailedUids map so it always works as expected.
-	importFailed := make(map[string]map[imap.UID]struct{}, len(c.Folders))
-	for folder := range c.Folders {
-		importFailed[folder] = make(map[imap.UID]struct{}, 0)
-	}
-
+	fc := createForwardConfig(c)
 	return &session{
-		client, mailboxUpdate, time.Duration(0), importFailed,
+		client, &fc, mailboxUpdate, time.Duration(0), fc.createUidMap[struct{}](),
 	}
 }
 
@@ -474,7 +469,7 @@ func TestDefaultForward(t *testing.T) {
 
 	config := &configImap{Address: addr}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -519,7 +514,7 @@ func TestForwardWithLabels(t *testing.T) {
 		},
 	}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -565,7 +560,7 @@ func TestForwardMultipleFolders(t *testing.T) {
 		},
 	}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -618,7 +613,7 @@ func TestForwardSetsNeverMarkSpam(t *testing.T) {
 		},
 	}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -653,7 +648,7 @@ func TestForwardSetsProcessForCalendar(t *testing.T) {
 		},
 	}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -680,7 +675,7 @@ func TestForwardImapCommands(t *testing.T) {
 
 	config := &configImap{Address: addr}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -840,7 +835,7 @@ func TestForwardArchiveUsesImapMove(t *testing.T) {
 		"INBOX": "Archive",
 	}}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -884,7 +879,7 @@ func TestForwardArchiveUsesImapCopy(t *testing.T) {
 		"INBOX": "Archive",
 	}}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -928,14 +923,13 @@ func TestForwardRetriesMessage(t *testing.T) {
 		"INBOX": []string{"INBOX"},
 	}}
 	session := createTestSession(config)
-	forwardCfg := createForwardConfig(config)
 	inbox := &mocks.ErrorInbox{
 		Returns: mocks.ErrRetryable,
 	}
 
 	// This should import the message both times.
 	for range 2 {
-		if err := session.forwardAndIdle(forwardCfg, inbox); err != nil {
+		if err := session.forwardAndIdle(inbox); err != nil {
 			t.Fatalf("Error executing forwardAndIdle: %v", err)
 		}
 	}
@@ -985,14 +979,13 @@ func TestForwardMovesFailedMessage(t *testing.T) {
 		"INBOX": "Failed",
 	}}
 	session := createTestSession(config)
-	forwardCfg := createForwardConfig(config)
 	inbox := &mocks.ErrorInbox{
 		Returns: mocks.ErrNonRetryable,
 	}
 
 	// This should import the message only once.
 	for range 2 {
-		if err := session.forwardAndIdle(forwardCfg, inbox); err != nil {
+		if err := session.forwardAndIdle(inbox); err != nil {
 			t.Fatalf("Error executing forwardAndIdle: %v", err)
 		}
 	}
@@ -1055,14 +1048,13 @@ func TestForwardSkipsFailedMessage(t *testing.T) {
 		"INBOX": []string{"INBOX"},
 	}}
 	session := createTestSession(config)
-	forwardCfg := createForwardConfig(config)
 	inbox := &mocks.ErrorInbox{
 		Returns: mocks.ErrNonRetryable,
 	}
 
 	// This should import the message only once.
 	for range 2 {
-		if err := session.forwardAndIdle(forwardCfg, inbox); err != nil {
+		if err := session.forwardAndIdle(inbox); err != nil {
 			t.Fatalf("Error executing forwardAndIdle: %v", err)
 		}
 	}
@@ -1119,8 +1111,7 @@ func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 		IdleFolder: "INBOX",
 	}
 	inbox := &mocks.MockInbox{}
-	fc := createForwardConfig(config)
-	if err := createTestSession(config).forwardAndIdle(fc, inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
@@ -1142,7 +1133,7 @@ func TestFolderSelectOrderMatchesConfig(t *testing.T) {
 			head = s
 		}
 	}
-	slicesEqual(t, fc.FolderOrderIdleLast, distinct)
+	slicesEqual(t, createForwardConfig(config).FolderOrderIdleLast, distinct)
 }
 
 func TestIdleFolderSelectIsLast(t *testing.T) {
@@ -1158,7 +1149,7 @@ func TestIdleFolderSelectIsLast(t *testing.T) {
 		IdleFolder: "INBOX",
 	}
 	inbox := &mocks.MockInbox{}
-	if err := createTestSession(config).forwardAndIdle(createForwardConfig(config), inbox); err != nil {
+	if err := createTestSession(config).forwardAndIdle(inbox); err != nil {
 		t.Fatalf("Error executing forwardAndIdle: %v", err)
 	}
 
