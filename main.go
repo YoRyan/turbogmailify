@@ -25,7 +25,10 @@ import (
 	"google.golang.org/api/option"
 )
 
-const maxPollTime = 5 * time.Minute
+const (
+	maxPollTime      = 5 * time.Minute
+	networkRetryTime = maxPollTime
+)
 
 func main() {
 	ctx := context.Background()
@@ -192,23 +195,22 @@ func doForwarding(ctx context.Context, c *config) {
 		go func() {
 			forwardConfig := createForwardConfig(&ic)
 			importFailedUids := forwardConfig.createUidMap[struct{}]()
+		Session:
 			for {
 				forwardConfig := createForwardConfig(&ic)
 				s, err := connectSession(&ic, &forwardConfig, importFailedUids)
 				if err != nil {
-					goto CoolOff
+					time.Sleep(networkRetryTime)
+					break Session
 				}
 
 				for {
-					if err := s.forwardAndIdle(gmInbox); err != nil {
-						goto CoolOff
+					cooldown, err := s.forwardAndIdle(gmInbox)
+					time.Sleep(cooldown)
+					if err != nil {
+						break Session
 					}
 				}
-
-			CoolOff:
-				// Error'd out, probably network or credentials. Cool down
-				// and try again.
-				time.Sleep(maxPollTime)
 			}
 		}()
 	}
@@ -389,7 +391,7 @@ func connectSession(c *configImap, f *forwardConfig, importFailedUids map[string
 }
 
 // Make a new connection to the IMAP server and retrieve and process messages.
-func (s *session) forwardAndIdle(gm gmailInbox) error {
+func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err error) {
 	// Interrogate each folder and retrieve and process everything inside.
 	// Idle folder is always last so it remains selected when we enter IDLE.
 	fc := s.config
@@ -402,7 +404,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 			Wait()
 		if err != nil {
 			log.Println("SELECT error:", err)
-			return err
+			return networkRetryTime, err
 		}
 
 		// Finish all imports as a single step before moving or expunging any
@@ -415,7 +417,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 		for i := range inbox.NumMessages {
 			uid, envelope, err := s.fetchMessage(i + 1)
 			if err != nil {
-				return err
+				return networkRetryTime, err
 			}
 
 			if _, failed := s.importFailedUids[folder][uid]; failed {
@@ -452,14 +454,14 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 			// Move to the configured archive folder.
 			for _, uid := range successUids {
 				if err := s.moveMessage(uid, dest); err != nil {
-					return err
+					return networkRetryTime, err
 				}
 			}
 		} else {
 			// Expunge
 			for _, uid := range successUids {
 				if err := s.deleteMessage(uid); err != nil {
-					return err
+					return networkRetryTime, err
 				}
 			}
 		}
@@ -468,7 +470,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 			// Move to the configured failed folder.
 			for _, uid := range failUids {
 				if err := s.moveMessage(uid, failFolder); err != nil {
-					return err
+					return networkRetryTime, err
 				}
 			}
 		} else {
@@ -480,11 +482,18 @@ func (s *session) forwardAndIdle(gm gmailInbox) error {
 	}
 
 	// Go back to sleep until the next mailbox update.
-	if err := s.doIdle(); err != nil {
-		return err
+	{
+		var cooldown time.Duration
+		cooldown, err = s.doIdle()
+		time.Sleep(cooldown)
+	}
+	if err != nil {
+		return
 	}
 
-	return nil
+	// No need for a cooldown of our own. We already blocked on doIdle() and
+	// consumed its cooldown.
+	return
 }
 
 // Retrieve one message from an inbox by sequence number.
@@ -644,11 +653,12 @@ func (s *session) deleteMessage(uid imap.UID) error {
 
 // Block until the next mailbox status update, or until the deadline has
 // elapsed.
-func (s *session) doIdle() error {
+func (s *session) doIdle() (cooldown time.Duration, err error) {
 	idle, err := s.client.Idle()
 	if err != nil {
-		log.Println("IDLE error:", err)
-		return err
+		// Probably means the server doesn't support IDLE. Nobody needs to know
+		// about it.
+		return s.idleDeadline, nil
 	}
 
 	timer := time.NewTimer(s.idleDeadline)
@@ -658,15 +668,18 @@ func (s *session) doIdle() error {
 	case <-timer.C:
 	}
 
-	if err := idle.Close(); err != nil {
-		log.Println("IDLE error:", err)
-		return err
+	// Any errors past this point should have occurred after idling or waiting,
+	// so no need for a cooldown.
+
+	if err = idle.Close(); err != nil {
+		log.Println("IDLE Close error:", err)
+		return
 	}
 
-	if err := idle.Wait(); err != nil {
-		log.Println("IDLE error:", err)
-		return err
+	if err = idle.Wait(); err != nil {
+		log.Println("IDLE Wait error:", err)
+		return
 	}
 
-	return nil
+	return
 }
