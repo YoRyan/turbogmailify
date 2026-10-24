@@ -192,32 +192,37 @@ func doForwarding(ctx context.Context, c *config) {
 
 	// Spin up a goroutine for each IMAP connection.
 	for _, ic := range c.Imap {
-		go func() {
-			forwardConfig := createForwardConfig(&ic)
-			importFailedUids := forwardConfig.createUidMap[struct{}]()
-		Session:
-			for {
-				forwardConfig := createForwardConfig(&ic)
-				s, err := connectSession(&ic, &forwardConfig, importFailedUids)
-				if err != nil {
-					time.Sleep(networkRetryTime)
-					break Session
-				}
-
-				for {
-					cooldown, err := s.forwardAndIdle(gmInbox)
-					time.Sleep(cooldown)
-					if err != nil {
-						break Session
-					}
-				}
-			}
-		}()
+		go doForwardingForImap(&ic, gmInbox)
 	}
 
 	// Put the main goroutine to sleep.
 	log.Println("Startup complete; waiting for mail")
 	select {}
+}
+
+// Forward mail indefinitely for a configured IMAP account.
+func doForwardingForImap(c *configImap, in gmailInbox) {
+	forwardConfig := createForwardConfig(c)
+	importFailedUids := forwardConfig.createUidMap[struct{}]()
+	for {
+		func() {
+			forwardConfig := createForwardConfig(c)
+			s, err := connectSession(c, &forwardConfig, importFailedUids)
+			if err != nil {
+				time.Sleep(networkRetryTime)
+				return
+			}
+			defer s.close()
+
+			for {
+				cooldown, err := s.forwardAndIdle(in)
+				time.Sleep(cooldown)
+				if err != nil {
+					return
+				}
+			}
+		}()
+	}
 }
 
 type forwardConfig struct {
@@ -548,6 +553,14 @@ func messageSummary(envelope []byte) summary {
 			size: size,
 		}
 	}
+}
+
+// Fully close out the session's resources.
+func (s *session) close() (err error) {
+	if err = s.client.Close(); err != nil {
+		return
+	}
+	return
 }
 
 // A Gmail target that can accept imported messages. This is an interface for
