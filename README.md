@@ -326,13 +326,14 @@ Assuming a TOML configuration file (omit `-toml` for a JSON configuration file),
 
 ```
 $ go build
-$ ./turbogmailify myconfig.file -auth -toml
+# Order is significant; flags must come before the config file path.
+$ ./turbogmailify -auth -toml myconfig.file
 ```
 
 (or)
 
 ```
-$ docker run -it --rm -v ./myconfig.file:/turbogmailify.conf ghcr.io/yoryan/turbogmailify:1 /turbogmailify.conf -auth -toml
+$ docker run -it --rm -v ./myconfig.file:/turbogmailify.conf ghcr.io/yoryan/turbogmailify:1 -auth -toml /turbogmailify.conf
 ```
 
 After completing this flow, you'll receive the tokens in the form of JSON data.
@@ -370,7 +371,7 @@ Description=Turbogmailify IMAP to Gmail
 
 [Service]
 Type=exec
-ExecStart=/usr/local/bin/turbogmailify /etc/turbogmailify.conf -toml
+ExecStart=/usr/local/bin/turbogmailify -toml /etc/turbogmailify.conf
 Restart=always
 RestartSec=10s
 
@@ -390,19 +391,19 @@ services:
       - source: turbogmailify
         target: /turbogmailify.conf
     # Not necessary if using a JSON configuration file.
-    command: /turbogmailify.conf -toml 
+    command: -toml /turbogmailify.conf
 configs:
   turbogmailify:
     content: |
-      [[Imap]]
-      Address = "imap.purelymail.com:993"
-      Username = "AzureDiamond@example.com"
-      Password = "hunter2"
-
       Secrets = '''
       {"installed":{"auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","auth_uri":"https://accounts.google.com/o/oauth2/auth","client_id":"xxx.apps.googleusercontent.com","client_secret":"GOCSPX-xxx","project_id":"turbogmailify","redirect_uris":["http://localhost"],"token_uri":"https://oauth2.googleapis.com/token"}}
       '''
       Tokens = '''
       {"access_token":"xxx","token_type":"Bearer","refresh_token":"xxx","expiry":"2026-04-04T09:02:00.907727817Z"}
       '''
+
+      [[Imap]]
+      Address = "imap.purelymail.com:993"
+      Username = "AzureDiamond@example.com"
+      Password = "hunter2"
 ```
