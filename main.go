@@ -206,7 +206,6 @@ func doForwardingForImap(c *configImap, in gmailInbox) {
 	importFailedUids := forwardConfig.createUidMap[struct{}]()
 	for {
 		func() {
-			forwardConfig := createForwardConfig(c)
 			s, err := connectSession(c, &forwardConfig, importFailedUids)
 			if err != nil {
 				time.Sleep(networkRetryTime)
