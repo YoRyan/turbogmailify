@@ -407,7 +407,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 			Select(folder, nil).
 			Wait()
 		if err != nil {
-			log.Println("SELECT error:", err)
+			log.Printf("SELECT error (%s): %v", folder, err)
 			return networkRetryTime, err
 		}
 
@@ -435,7 +435,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 				fc.id, folder, sum.size, sum.subject)
 
 			if err := gm.DoImport(envelope, fc.folderToNeverMarkSpam[folder], fc.folderToProcessForCalendar[folder], labels...); err != nil {
-				log.Printf("Error importing message: %v", err)
+				log.Printf("Error importing message %s: %v", sum.messageId, err)
 				if isImportRetryable(err) {
 					// Leave it alone; try again next cycle.
 				} else {
@@ -447,7 +447,9 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 					} else {
 						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be done with the FailedFolders option."
 					}
-					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, fc.id, folder, sum.subject, sum.messageId, sum.size, disposition))
+					notifSubject := fmt.Sprintf("Turbogmailify Import Failure: (%s %s): %s", fc.id, folder, sum.subject)
+					notifBody := fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, fc.id, folder, sum.subject, sum.messageId, sum.size, disposition)
+					sendNotification(gm, notifSubject, notifBody)
 				}
 			} else {
 				successUids = append(successUids, uid)

@@ -1031,7 +1031,7 @@ func TestForwardMovesFailedMessage(t *testing.T) {
 	}
 	{
 		msg := inbox.Messages[1]
-		if !strings.Contains(string(msg.Envelope), "Message Import Failure") {
+		if !strings.Contains(string(msg.Envelope), "Turbogmailify Import Failure") {
 			t.Fatalf("inbox.Messages[1] does not look like a failure notification from turbogmailify")
 		}
 	}
@@ -1091,7 +1091,7 @@ func TestForwardSkipsFailedMessage(t *testing.T) {
 	}
 	{
 		msg := inbox.Messages[1]
-		if !strings.Contains(string(msg.Envelope), "Message Import Failure") {
+		if !strings.Contains(string(msg.Envelope), "Turbogmailify Import Failure") {
 			t.Fatalf("inbox.Messages[1] does not look like a failure notification from turbogmailify")
 		}
 	}
