@@ -31,6 +31,8 @@ const (
 	networkRetryTime = maxPollTime
 )
 
+const maxMessagesInOneBatch = 32
+
 func main() {
 	var (
 		doAuth   bool
@@ -418,6 +420,8 @@ func connectSession(c *configImap, f *forwardConfig, importFailedUids map[string
 
 // Make a new connection to the IMAP server and retrieve and process messages.
 func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err error) {
+	var unfetchedMessages = false // any folder with more messages?
+
 	// Interrogate each folder and retrieve and process everything inside.
 	// Idle folder is always last so it remains selected when we enter IDLE.
 	fc := s.config
@@ -433,14 +437,22 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 			return networkRetryTime, err
 		}
 
-		// Finish all imports as a single step before moving or expunging any
+		// Handle a bunch of imports (up to maxMessagesInOneBatch)
+		// as a single step before moving or expunging any
 		// messages. These operations affect the sequence numbers.
+
+		messageCount := min(maxMessagesInOneBatch, inbox.NumMessages)
+		if messageCount < inbox.NumMessages {
+			unfetchedMessages = true
+		}
+
 		var (
 			successUids = make([]imap.UID, 0)
 			failUids    = make([]imap.UID, 0)
 		)
 		failFolder, failFolderOk := fc.folderToFailed[folder]
-		for i := range inbox.NumMessages {
+
+		for i := range messageCount {
 			uid, envelope, err := s.fetchMessage(i + 1)
 			if err != nil {
 				return networkRetryTime, err
@@ -525,8 +537,8 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 		}
 	}
 
-	// Go back to sleep until the next mailbox update.
-	{
+	// Unless a big folder has more messages, sleep until the idle mailbox updates.
+	if !unfetchedMessages {
 		var cooldown time.Duration
 		cooldown, err = s.doIdle()
 		time.Sleep(cooldown)
