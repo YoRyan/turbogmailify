@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/mail"
 	"net/url"
 	"os"
@@ -32,18 +32,22 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
-
 	var (
-		doAuth  bool
-		useToml bool
+		doAuth   bool
+		useToml  bool
+		logLevel int
 	)
 	flag.BoolVar(&doAuth, "auth", false, "Request access and refresh tokens from Google instead of processing mail.")
 	flag.BoolVar(&useToml, "toml", false, "Process the configuration file as a TOML file, with the Secrets and Tokens sections as strings.")
+	flag.IntVar(&logLevel, "log", int(slog.LevelInfo), "Change the log level, which defaults to INFO (0). See https://pkg.go.dev/log/slog#Level.")
 	flag.Parse()
 
+	// Use TextHandler to filter out control codes and avoid console logging attacks.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.Level(logLevel)})))
+
 	if flag.NArg() < 1 {
-		log.Fatalln("Did not pass path to configuration file.")
+		slog.Error("Did not pass path to configuration file.")
+		os.Exit(1)
 	}
 
 	path := flag.Arg(0)
@@ -51,51 +55,59 @@ func main() {
 
 	b, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatalln("Failed to open config file:", err)
+		slog.Error("Failed to open config file", "err", err)
+		os.Exit(1)
 	}
 
 	if useToml {
 		tomlCfg := &tomlConfig{}
 		if err := toml.Unmarshal(b, tomlCfg); err != nil {
-			log.Fatalln("Failed to parse config file:", err)
+			slog.Error("Failed to parse config file", "err", err)
+			os.Exit(1)
 		}
 
 		cfg.Imap = tomlCfg.Imap
 
 		if tomlCfg.Secrets != "" {
 			if err := json.NewDecoder(strings.NewReader(tomlCfg.Secrets)).Decode(&cfg.Secrets); err != nil {
-				log.Fatalln("Unable to decode embedded JSON 'Secrets' section:", err)
+				slog.Error("Unable to decode embedded JSON 'Secrets' section", "err", err)
+				os.Exit(1)
 			}
 		} else {
-			log.Fatalln("Failed to parse config file:",
-				"Google credentials ('Secrets') are missing")
+			slog.Error("Failed to parse config file",
+				"err", "Google credentials ('Secrets') are missing")
+			os.Exit(1)
 		}
 
 		if tomlCfg.Tokens != "" {
 			if err := json.NewDecoder(strings.NewReader(tomlCfg.Tokens)).Decode(&cfg.Tokens); err != nil {
-				log.Fatalln("Unable to decode embedded JSON 'Tokens' section:", err)
+				slog.Error("Unable to decode embedded JSON 'Tokens' section", "err", err)
+				os.Exit(1)
 			}
 		}
 	} else {
 		if err := json.Unmarshal(b, cfg); err != nil {
-			log.Fatalln("Failed to parse config file:", err)
+			slog.Error("Failed to parse config file", "err", err)
+			os.Exit(1)
 		}
 	}
 
 	if len(cfg.Imap) <= 0 {
-		log.Fatalln("Failed to parse config file:",
-			"IMAP credentials section is empty or not a JSON list")
+		slog.Error("Failed to parse config file",
+			"err", "IMAP credentials section is empty or not a JSON list")
+		os.Exit(1)
 	}
 
 	if cfg.Secrets == nil {
-		log.Fatalln("Failed to parse config file:",
-			"Google credentials ('Secrets') are missing")
+		slog.Error("Failed to parse config file",
+			"err", "Google credentials ('Secrets') are missing")
+		os.Exit(1)
 	}
 
 	if doAuth {
-		doRequestAuth(ctx, cfg)
+		doRequestAuth(cfg)
 	} else {
-		doForwarding(ctx, cfg)
+		doForwarding(cfg)
 	}
 }
 
@@ -135,13 +147,14 @@ func (c *config) getOAuthConfig() (oa *oauth2.Config) {
 
 	oa, err = google.ConfigFromJSON(secrets, gmail.GmailInsertScope)
 	if err != nil {
-		log.Fatalln("Unable to create Google OAuth2 client:", err)
+		slog.Error("Unable to create Google OAuth2 client", "err", err)
+		os.Exit(1)
 	}
 	return
 }
 
 // Run in request tokens mode.
-func doRequestAuth(ctx context.Context, c *config) {
+func doRequestAuth(c *config) {
 	oa := c.getOAuthConfig()
 
 	authURL := oa.AuthCodeURL("", oauth2.AccessTypeOffline)
@@ -152,42 +165,50 @@ func doRequestAuth(ctx context.Context, c *config) {
 	fmt.Println("")
 	fmt.Println("Once you've authorized the request, your browser will redirect to an http://localhost URL that will fail to load. Paste the entire URL here:")
 	if _, err := fmt.Scan(&redirectURL); err != nil {
-		log.Fatalln("Unable to read redirected URL:", err)
+		slog.Error("Unable to read redirected URL", "err", err)
+		os.Exit(1)
 	}
 
 	parsedURL, err := url.Parse(redirectURL)
 	if err != nil {
-		log.Fatalln("Unable to parse redirected URL:", err)
+		slog.Error("Unable to parse redirected URL", "err", err)
+		os.Exit(1)
 	}
 
 	authCode := parsedURL.Query().Get("code")
 	if authCode == "" {
-		log.Fatalln("URL does not look like it contains a Google code:", "missing 'code' value in query string")
+		slog.Error("URL does not look like it contains a Google code", "err", "missing 'code' value in query string")
+		os.Exit(1)
 	}
 
-	tokens, err := oa.Exchange(ctx, authCode)
+	tokens, err := oa.Exchange(context.Background(), authCode)
 	if err != nil {
-		log.Fatalln("Unable to retrieve tokens from Google:", err)
+		slog.Error("Unable to retrieve tokens from Google", "err", err)
+		os.Exit(1)
 	}
 
 	fmt.Println("")
 	fmt.Println("Your 'Tokens' section is as follows:")
 	if err := json.NewEncoder(os.Stdout).Encode(tokens); err != nil {
-		log.Fatalln("Error converting tokens to JSON:", err)
+		slog.Error("Error converting tokens to JSON", "err", err)
+		os.Exit(1)
 	}
 }
 
 // Run in mail forwarding mode.
-func doForwarding(ctx context.Context, c *config) {
+func doForwarding(c *config) {
 	if c.Tokens == nil {
-		log.Fatalln("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
+		slog.Error("Authorization tokens ('Tokens') are missing. Obtain them with -auth mode.")
+		os.Exit(1)
 	}
 
 	oa := c.getOAuthConfig()
 
+	ctx := context.Background()
 	gmService, err := gmail.NewService(ctx, option.WithHTTPClient(oa.Client(ctx, c.Tokens)))
 	if err != nil {
-		log.Fatalln("Unable to create Gmail client:", err)
+		slog.Error("Unable to create Gmail client", "err", err)
+		os.Exit(1)
 	}
 	gmInbox := (*gmailInboxReal)(gmService)
 
@@ -197,7 +218,7 @@ func doForwarding(ctx context.Context, c *config) {
 	}
 
 	// Put the main goroutine to sleep.
-	log.Println("Startup complete; waiting for mail")
+	slog.Info("Startup complete; waiting for mail")
 	select {}
 }
 
@@ -378,7 +399,7 @@ func connectSession(c *configImap, f *forwardConfig, importFailedUids map[string
 	// Open the connection.
 	client, err := imapclient.DialTLS(c.Address, &imapclient.Options{UnilateralDataHandler: dataHandler})
 	if err != nil {
-		log.Println("Error connecting to IMAP server:", err)
+		slog.Error("Error connecting to IMAP server", "err", err)
 		return nil, err
 	}
 
@@ -387,7 +408,7 @@ func connectSession(c *configImap, f *forwardConfig, importFailedUids map[string
 		Login(c.Username, c.Password).
 		Wait(); err != nil {
 
-		log.Println("LOGIN error:", err)
+		slog.Error("LOGIN error", "err", err)
 		client.Close()
 		return nil, err
 	}
@@ -408,7 +429,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 			Select(folder, nil).
 			Wait()
 		if err != nil {
-			log.Println("SELECT error:", err)
+			slog.Error("SELECT error", "err", err)
 			return networkRetryTime, err
 		}
 
@@ -431,12 +452,10 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 			}
 
 			sum := messageSummary(envelope)
-			log.Printf(
-				"Importing message received by %s (folder %s, size %s, subject %s)",
-				fc.id, folder, sum.size, sum.subject)
+			slog.Info("Importing message", "account", fc.id, "folder", folder, "size", sum.size, "subject", sum.subject)
 
 			if err := gm.DoImport(envelope, fc.folderToNeverMarkSpam[folder], fc.folderToProcessForCalendar[folder], labels...); err != nil {
-				log.Printf("Error importing message: %v", err)
+				slog.Error("Error importing message", "err", err)
 				if isImportRetryable(err) {
 					// Leave it alone; try again next cycle.
 				} else {
@@ -464,7 +483,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 							"Folder":      folder,
 							"Size":        sum.size,
 							"Disposition": disposition,
-							// These values must always be escaped. They come from directly from raw email headers.
+							// Make sure to escape these values properly. They come from directly from raw email headers.
 							"Subject":   sum.subject,
 							"MessageID": sum.messageId,
 						})
@@ -534,7 +553,7 @@ func (s *session) fetchMessage(seq uint32) (uid imap.UID, data []byte, err error
 
 	messages, err := fetch.Collect()
 	if err != nil {
-		log.Println("FETCH error:", err)
+		slog.Error("FETCH error", "err", err)
 		return
 	}
 
@@ -604,13 +623,13 @@ func (gm *gmailInboxReal) DoImport(envelope []byte, neverMarkSpam, processForCal
 			googleapi.ContentType("message/rfc822")).
 		Do()
 	if err != nil {
-		log.Println("Error uploading to Gmail:", err)
+		slog.Error("Error uploading to Gmail", "err", err)
 		return err
 	}
 
 	if r.HTTPStatusCode != 200 {
 		err := fmt.Errorf("gmail returned status code: %v", r.HTTPStatusCode)
-		log.Println(err)
+		slog.Error("Gmail upload returned HTTP status code", "code", r.HTTPStatusCode)
 		return err
 	}
 
@@ -660,7 +679,7 @@ func (s *session) moveMessage(uid imap.UID, mailbox string) error {
 		Move(imap.UIDSetNum(uid), mailbox).
 		Wait(); err != nil {
 
-		log.Println("MOVE error:", err)
+		slog.Error("MOVE error", "err", err)
 		return err
 	}
 
@@ -680,7 +699,7 @@ func (s *session) deleteMessage(uid imap.UID) error {
 		Store(setNum, addDeleted, nil).
 		Close(); err != nil {
 
-		log.Println("STORE error:", err)
+		slog.Error("STORE error", "err", err)
 		return err
 	}
 
@@ -688,7 +707,7 @@ func (s *session) deleteMessage(uid imap.UID) error {
 		Expunge().
 		Close(); err != nil {
 
-		log.Println("EXPUNGE error:", err)
+		slog.Error("EXPUNGE error", "err", err)
 		return err
 	}
 
@@ -700,8 +719,8 @@ func (s *session) deleteMessage(uid imap.UID) error {
 func (s *session) doIdle() (cooldown time.Duration, err error) {
 	idle, err := s.client.Idle()
 	if err != nil {
-		// Probably means the server doesn't support IDLE. Nobody needs to know
-		// about it.
+		// Probably means the server doesn't support IDLE.
+		slog.Debug("IDLE error", "err", err)
 		return s.idleDeadline, nil
 	}
 
@@ -716,12 +735,12 @@ func (s *session) doIdle() (cooldown time.Duration, err error) {
 	// so no need for a cooldown.
 
 	if err = idle.Close(); err != nil {
-		log.Println("IDLE Close error:", err)
+		slog.Debug("IDLE Close error", "err", err)
 		return
 	}
 
 	if err = idle.Wait(); err != nil {
-		log.Println("IDLE Wait error:", err)
+		slog.Debug("IDLE Wait error", "err", err)
 		return
 	}
 
