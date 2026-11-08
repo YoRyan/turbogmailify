@@ -445,7 +445,7 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 					if failFolderOk {
 						disposition = fmt.Sprintf("The message has been moved to %s, the configured IMAP folder for failed messages.", failFolder)
 					} else {
-						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be done with the FailedFolders option."
+						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be accomplished with the FailedFolders option."
 					}
 					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, fc.id, folder, sum.subject, sum.messageId, sum.size, disposition))
 				}
