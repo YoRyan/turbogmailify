@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html/template"
 	"log"
 	"net/mail"
 	"net/url"
@@ -447,7 +448,27 @@ func (s *session) forwardAndIdle(gm gmailInbox) (cooldown time.Duration, err err
 					} else {
 						disposition = "The message will not be uploaded again until the next restart of the service. It is recommended that you designate an IMAP folder to move failed messages into so they will not be retried again. This can be accomplished with the FailedFolders option."
 					}
-					sendNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.id, folder), fmt.Sprintf("Error: %v\nAccount: %s\nFolder: %s\nSubject: %s\nMessage-ID: %s\nSize: %s\n\n%s", err, fc.id, folder, sum.subject, sum.messageId, sum.size, disposition))
+					body := executeTemplate(
+						template.Must(template.New("body").Parse(`<table>
+<tr><td>Error:</td><td>{{ .Error }}</td></tr>
+<tr><td>Account:</td><td>{{ .Account }}</td></tr>
+<tr><td>Folder:</td><td>{{ .Folder }}</td></tr>
+<tr><td>Subject:</td><td>{{ .Subject }}</td></tr>
+<tr><td>Message-ID:</td><td>{{ .MessageID }}</td></tr>
+<tr><td>Size:</td><td>{{ .Size }}</td></tr>
+</table>
+<p>{{ .Disposition }}</p>`)),
+						map[string]string{
+							"Error":       err.Error(),
+							"Account":     fc.id,
+							"Folder":      folder,
+							"Size":        sum.size,
+							"Disposition": disposition,
+							// These values must always be escaped. They come from directly from raw email headers.
+							"Subject":   sum.subject,
+							"MessageID": sum.messageId,
+						})
+					sendHtmlNotification(gm, fmt.Sprintf("Message Import Failure: %s (%s)", fc.id, folder), body)
 				}
 			} else {
 				successUids = append(successUids, uid)
@@ -610,13 +631,24 @@ func isImportRetryable(err error) bool {
 	return true
 }
 
-func sendNotification(gm gmailInbox, subject, body string) error {
+func executeTemplate(tmpl *template.Template, data any) string {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return err.Error()
+	} else {
+		return buf.String()
+	}
+}
+
+func sendHtmlNotification(gm gmailInbox, subject, body string) error {
 	envelope := fmt.Sprintf(`From: Turbogmailify <me>
 To: me
 Subject: %s
-Content-Type: text/plain
+Content-Type: text/html
 
+<html><body>
 %s
+</body></html>
 `, subject, body)
 	return gm.DoImport([]byte(envelope), true, false, "INBOX")
 }
